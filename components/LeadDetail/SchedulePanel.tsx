@@ -57,30 +57,28 @@ const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSched
             onClick={setNextMorning}
           />
         </div>
+      </div>
 
-          </div>
-        </div>
+      <div className="space-y-3">
+        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
+          Add Note (Optional)
+        </label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="E.g., Follow up on the pricing proposal..."
+          className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-medium text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all h-24 resize-none"
+        />
+      </div>
 
-        <div className="space-y-3">
-          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
-            Add Note (Optional)
-          </label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="E.g., Follow up on the pricing proposal..."
-            className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-medium text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all h-24 resize-none"
-          />
-        </div>
-
-        <button
-          onClick={() => onSchedule(null, schedulingDate, note)}
-          disabled={!schedulingDate}
-          className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 disabled:bg-slate-200 shadow-xl shadow-indigo-100 transition-all"
-        >
-          Set Appointment
-        </button>
-      </div >
+      <button
+        onClick={() => onSchedule(null, schedulingDate, note)}
+        disabled={!schedulingDate}
+        className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 disabled:bg-slate-200 shadow-xl shadow-indigo-100 transition-all"
+      >
+        Set Appointment
+      </button>
+    </div >
     </section >
   );
 });

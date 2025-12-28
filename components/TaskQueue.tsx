@@ -549,7 +549,15 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
               const dayTasks = date ? getTasksForDay(date) : [];
               const isToday = date && date.getDate() === new Date().getDate() && date.getMonth() === new Date().getMonth() && date.getFullYear() === new Date().getFullYear();
 
-              if (!date && calendarMode === 'week') return null; // Should not happen in week view
+              if (!date && calendarMode === 'week') return null;
+
+              // Group tasks by Strategy
+              const tasksByStrategy = dayTasks.reduce((acc, task) => {
+                const strategyName = strategies.find(s => s.id === task.strategyId)?.name || 'Manual Tasks';
+                if (!acc[strategyName]) acc[strategyName] = 0;
+                acc[strategyName]++;
+                return acc;
+              }, {} as Record<string, number>);
 
               return (
                 <div key={idx} className={`min-h-[140px] p-4 border-r border-b border-slate-50 last:border-r-0 group hover:bg-slate-50/50 transition-all ${date ? '' : 'bg-slate-50/20'}`}>
@@ -559,19 +567,18 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
                         {dayNum}
                       </span>
                       <div className="space-y-2 flex-1 overflow-y-auto pr-1 scrollbar-hide max-h-[300px]">
-                        {dayTasks.map(t => {
-                          const taskStep = strategies.find(s => s.id === t.strategyId)?.steps[t.currentStepIndex];
-                          return (
-                            <div
-                              key={t.id}
-                              onClick={() => onSelectLead(t.id)}
-                              className={`p-2 rounded-xl border text-[9px] font-black uppercase tracking-tight flex items-center gap-2 cursor-pointer shadow-sm hover:scale-[1.02] transition-all bg-white border-slate-100 ${getPlatformColor(taskStep?.action)}`}
-                            >
-                              {taskStep && ACTION_ICONS[taskStep.action]}
-                              <span className="truncate">{t.companyName}</span>
-                            </div>
-                          );
-                        })}
+                        {Object.entries(tasksByStrategy).map(([name, count]) => (
+                          <div key={name} className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-[9px] font-black uppercase tracking-wider border border-indigo-100/50 shadow-sm cursor-default">
+                            {name} <span className="text-indigo-400 ml-1">({count})</span>
+                          </div>
+                        ))}
+                        {dayTasks.length === 0 && (
+                          <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="w-1 h-1 bg-slate-200 rounded-full mx-1"></div>
+                            <div className="w-1 h-1 bg-slate-200 rounded-full mx-1"></div>
+                            <div className="w-1 h-1 bg-slate-200 rounded-full mx-1"></div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
