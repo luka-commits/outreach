@@ -147,33 +147,45 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
   };
 
   const handleCompleteTask = () => {
-    if (!currentLead || !strategy || !step) return;
+    if (!currentLead) return;
 
-    // ... Update logic ...
-    const nextStepIndex = currentLead.currentStepIndex + 1;
-    const isLastStep = nextStepIndex >= strategy.steps.length;
-    const isFirstOutreach = currentLead.currentStepIndex === 0;
-    const platform = getPlatformFromAction(step.action);
+    // Handle Manual/No-Strategy Case
+    if (!strategy || !step) {
+      // Just clear nextTaskDate to remove from queue
+      const updatedLead: Lead = {
+        ...currentLead,
+        nextTaskDate: undefined,
+        status: 'in_progress' // Keep in progress
+      };
+      onUpdateLead(updatedLead);
+      onAddActivity(currentLead.id, `Manual Task Completed`, message || 'Task done', false, 'call');
+    } else {
+      // Standard Strategy Logic
+      const nextStepIndex = currentLead.currentStepIndex + 1;
+      const isLastStep = nextStepIndex >= strategy.steps.length;
+      const isFirstOutreach = currentLead.currentStepIndex === 0;
+      const platform = getPlatformFromAction(step.action);
 
-    let nextTaskDate: string | undefined = undefined;
-    if (!isLastStep) {
-      const nextStep = strategy.steps[nextStepIndex];
-      const today = new Date();
-      today.setDate(today.getDate() + (nextStep.dayOffset - step.dayOffset));
-      nextTaskDate = today.toISOString();
+      let nextTaskDate: string | undefined = undefined;
+      if (!isLastStep) {
+        const nextStep = strategy.steps[nextStepIndex];
+        const today = new Date();
+        today.setDate(today.getDate() + (nextStep.dayOffset - step.dayOffset));
+        nextTaskDate = today.toISOString();
+      }
+
+      const updatedLead: Lead = {
+        ...currentLead,
+        currentStepIndex: nextStepIndex,
+        nextTaskDate: nextTaskDate,
+        status: isLastStep ? 'replied' : 'in_progress'
+      };
+
+      onUpdateLead(updatedLead);
+      onAddActivity(currentLead.id, `Task completed: ${step.action}`, message, isFirstOutreach, platform);
     }
 
-    const updatedLead: Lead = {
-      ...currentLead,
-      currentStepIndex: nextStepIndex,
-      nextTaskDate: nextTaskDate,
-      status: isLastStep ? 'replied' : 'in_progress'
-    };
-
-    onUpdateLead(updatedLead);
-    onAddActivity(currentLead.id, `Task completed: ${step.action}`, message, isFirstOutreach, platform);
-
-    // AUTO-ADVANCE LOGIC
+    // AUTO-ADVANCE LOGIC (Common)
     if (isSessionMode) {
       // Find next task in sessionTasks that isn't the current one
       const currentIndex = sessionTasks.findIndex(t => t.id === currentLead.id);
@@ -195,6 +207,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
       setViewMode('list');
     }
   };
+
 
   const startProcessingTask = (leadId: string) => {
     setProcessLeadId(leadId);
@@ -273,7 +286,17 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
   };
 
 
-  if (viewMode === 'processing' && currentLead && step) {
+  if (viewMode === 'processing' && currentLead) {
+    // Fallback for manual tasks or missing strategy
+    const hasStrategy = !!strategy && !!step;
+    const displayAction = hasStrategy ? step!.action : 'manual_task';
+    const displayActionLabel = hasStrategy ? step!.action.replace('_', ' ') : 'Manual Task';
+    const displayStrategyName = strategy?.name || 'Manual';
+    const stepLabel = hasStrategy ? `Step ${currentLead.currentStepIndex + 1}` : 'Manual';
+
+    // Fallback template message
+    const displayMessage = message || currentLead.nextTaskNote || '';
+
     return (
       <div className="max-w-xl mx-auto space-y-6 animate-in slide-in-from-right-4 duration-300">
         <div className="flex items-center justify-between">
@@ -284,7 +307,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
             {isSessionMode ? (
               <span className="text-indigo-600">Session: {sessionTasks.findIndex(t => t.id === currentLead.id) + 1} / {sessionTasks.length}</span>
             ) : (
-              `Step ${currentLead.currentStepIndex + 1}`
+              stepLabel
             )}
           </div>
           <div className="w-6" />
@@ -294,10 +317,10 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
           <div className="text-center space-y-2">
             <h2 className="text-3xl font-black text-slate-900 leading-tight">{currentLead.companyName}</h2>
             <div className="flex items-center justify-center gap-2 text-slate-400 text-sm font-medium">
-              <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase">{strategy?.name}</span>
+              <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase">{displayStrategyName}</span>
               <span className="flex items-center gap-1 uppercase tracking-wider font-bold text-[10px]">
-                {ACTION_ICONS[step.action]}
-                {step.action.replace('_', ' ')}
+                {ACTION_ICONS[displayAction] || <CheckSquare size={14} />}
+                {displayActionLabel}
               </span>
             </div>
           </div>
@@ -305,14 +328,17 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
           <div className="space-y-4">
             <div className="flex justify-between items-center px-2">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Message Draft</span>
-              <button onClick={handlePersonalize} disabled={personalizing} className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 disabled:opacity-50">
-                {personalizing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} AI Personalize
-              </button>
+              {hasStrategy && (
+                <button onClick={handlePersonalize} disabled={personalizing} className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 disabled:opacity-50">
+                  {personalizing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} AI Personalize
+                </button>
+              )}
             </div>
             <div className="relative">
               <textarea
-                value={message}
+                value={displayMessage}
                 onChange={(e) => setMessage(e.target.value)}
+                placeholder={currentLead.nextTaskNote ? "Note: " + currentLead.nextTaskNote : "Enter message or notes..."}
                 className="w-full min-h-[160px] p-6 bg-slate-50 border border-slate-200 rounded-[2rem] text-slate-700 font-medium resize-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 outline-none leading-relaxed transition-all"
               />
               <button onClick={handleCopy} className="absolute bottom-4 right-4 bg-white p-3 rounded-2xl shadow-sm border border-slate-100 text-slate-600 hover:text-indigo-600 active:scale-95 transition-all">
@@ -322,17 +348,25 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
           </div>
 
           <div className="grid grid-cols-1 gap-4">
-            {step.action === 'send_dm' && <ActionButton icon={<Instagram />} label="Open Instagram" href={currentLead.instagramUrl} color="bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white" />}
-            {step.action === 'linkedin_dm' && <ActionButton icon={<Linkedin />} label="Open LinkedIn" href={currentLead.linkedinUrl} color="bg-[#0A66C2] text-white" />}
-            {step.action === 'send_email' && <ActionButton icon={<Mail />} label="Open Email" href={currentLead.email ? `mailto:${currentLead.email}?subject=Inquiry&body=${encodeURIComponent(message)}` : undefined} color="bg-[#EA4335] text-white" />}
-            {step.action === 'fb_message' && <ActionButton icon={<Facebook />} label="Open Facebook" href={currentLead.facebookUrl} color="bg-[#1877F2] text-white" />}
-            {step.action === 'call' && <ActionButton icon={<Phone />} label="Call Now" href={currentLead.phone ? `tel:${currentLead.phone}` : undefined} color="bg-[#25D366] text-white" />}
+            {/* Render actions only if defined in step, otherwise show generic 'Mark Complete' */}
+            {hasStrategy ? (
+              <>
+                {step!.action === 'send_dm' && <ActionButton icon={<Instagram />} label="Open Instagram" href={currentLead.instagramUrl} color="bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white" />}
+                {step!.action === 'linkedin_dm' && <ActionButton icon={<Linkedin />} label="Open LinkedIn" href={currentLead.linkedinUrl} color="bg-[#0A66C2] text-white" />}
+                {step!.action === 'send_email' && <ActionButton icon={<Mail />} label="Open Email" href={currentLead.email ? `mailto:${currentLead.email}?subject=Inquiry&body=${encodeURIComponent(displayMessage)}` : undefined} color="bg-[#EA4335] text-white" />}
+                {step!.action === 'fb_message' && <ActionButton icon={<Facebook />} label="Open Facebook" href={currentLead.facebookUrl} color="bg-[#1877F2] text-white" />}
+                {step!.action === 'call' && <ActionButton icon={<Phone />} label="Call Now" href={currentLead.phone ? `tel:${currentLead.phone}` : undefined} color="bg-[#25D366] text-white" />}
+              </>
+            ) : (
+              <div className="p-4 bg-slate-50 rounded-2xl text-center text-slate-500 text-sm font-medium">
+                {currentLead.nextTaskNote || "No specific action defined. Check notes."}
+              </div>
+            )}
           </div>
 
           <div className="pt-4 flex gap-4">
             <button onClick={() => {
               if (isSessionMode) {
-                /* Logic to just skip to next without completing? */
                 const currentIndex = sessionTasks.findIndex(t => t.id === currentLead.id);
                 const nextTask = sessionTasks[currentIndex + 1];
                 if (nextTask) setProcessLeadId(nextTask.id);

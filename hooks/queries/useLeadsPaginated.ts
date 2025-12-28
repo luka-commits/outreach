@@ -100,9 +100,14 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
                     queryClient.invalidateQueries({ queryKey: queryKeys.lead(userId, newLead.id) });
                 }
             },
-            // Note: We intentionally don't use onSettled here to avoid refetching
             // The optimistic update handles the UI, and React Query's staleTime
             // will eventually refresh the data. This prevents lead position jumping.
+            // However, we MUST invalidate 'tasks' so the Queue updates properly (removals/reschedules)
+            onSettled: () => {
+                queryClient.invalidateQueries({ queryKey: ['tasks', userId] });
+                // Also invalidate 'all-scheduled' mostly used by Calendar
+                queryClient.invalidateQueries({ queryKey: ['tasks', userId, 'all-scheduled'] });
+            }
         }),
         deleteLead: useMutation({
             mutationFn: (id: string) => api.deleteLead(id, userId!),
