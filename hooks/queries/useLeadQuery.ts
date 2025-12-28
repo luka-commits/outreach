@@ -4,7 +4,7 @@ import { queryKeys } from '../../lib/queryClient';
 
 export function useLeadQuery(leadId: string | undefined, userId: string | undefined) {
     return useQuery({
-        queryKey: ['lead', leadId, userId],
+        queryKey: queryKeys.lead(userId!, leadId!),
         queryFn: () => api.getLead(leadId!, userId!),
         enabled: !!leadId && !!userId,
     });
