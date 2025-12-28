@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, memo } from 'react';
 import {
   ArrowLeft, Check, Copy, ExternalLink, Instagram, Mail, Phone,
   Facebook, Sparkles, Loader2, Linkedin, LayoutGrid, List, ChevronRight,
-  PlayCircle, Clock, Calendar as CalendarIcon, ChevronLeft, MapPin, AlertCircle, RefreshCw, CheckSquare
+  PlayCircle, Clock, Calendar as CalendarIcon, ChevronLeft, MapPin, AlertCircle, RefreshCw, CheckSquare, Trash2
 } from 'lucide-react';
 import { Lead, Strategy, Activity } from '../types';
 import { ACTION_ICONS } from '../constants';
@@ -23,11 +23,15 @@ type ViewMode = 'list' | 'calendar' | 'processing';
 type FilterType = 'overdue' | 'today' | 'upcoming';
 type CalendarMode = 'week' | 'month';
 
+import ConfirmModal from './ConfirmModal';
+import { useToast } from './Toast';
+
 const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, strategies, onBack, onUpdateLead, onAddActivity, onSelectLead }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [activeFilter, setActiveFilter] = useState<FilterType>('today');
   const [calendarMode, setCalendarMode] = useState<CalendarMode>('week');
   const [isSessionMode, setIsSessionMode] = useState(false);
+  const { showToast } = useToast();
 
   // Processing State
   const [processLeadId, setProcessLeadId] = useState<string | null>(null);
@@ -35,6 +39,10 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
   const [copied, setCopied] = useState(false);
   const [personalizing, setPersonalizing] = useState(false);
   const [message, setMessage] = useState('');
+
+  // Delete Confirmation State
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
 
   // Calendar State
   const [currentDate, setCurrentDate] = useState(new Date()); // Used for both Month and Week view anchor
@@ -242,6 +250,28 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
     return allScheduledTasks.filter(t => t.nextTaskDate?.startsWith(dateStr));
   };
 
+  const confirmDeleteTask = (leadId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTaskToDelete(leadId);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDeleteTask = () => {
+    if (!taskToDelete) return;
+
+    const lead = allScheduledTasks.find(l => l.id === taskToDelete);
+    if (!lead) return;
+
+    // Clear nextTaskDate to remove from queue
+    const updatedLead: Lead = {
+      ...lead,
+      nextTaskDate: undefined
+    };
+
+    onUpdateLead(updatedLead);
+    showToast('Task removed from queue', 'success');
+  };
+
 
   if (viewMode === 'processing' && currentLead && step) {
     return (
@@ -396,7 +426,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-8 text-right">
+                    <div className="flex items-center gap-4 text-right">
                       <div className="hidden md:block">
                         <p className={`text-xs font-black uppercase tracking-widest ${isOverdue ? 'text-rose-500' : isToday ? 'text-indigo-500' : 'text-slate-400'
                           }`}>
@@ -406,9 +436,19 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
                           {new Date(task.nextTaskDate!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </p>
                       </div>
-                      <button className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-slate-300 group-hover:border-indigo-500 group-hover:text-indigo-500 transition-all">
-                        <ChevronRight size={20} />
-                      </button>
+
+                      <div className="flex bg-slate-100 rounded-xl p-1">
+                        <button
+                          onClick={(e) => confirmDeleteTask(task.id, e)}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-white hover:shadow-sm transition-all"
+                          title="Remove from queue"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                        <button className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-indigo-600 hover:bg-white hover:shadow-sm transition-all">
+                          <ChevronRight size={18} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -544,7 +584,19 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
     );
   }
 
-  return null;
+  return (
+    <>
+      <ConfirmModal
+        isOpen={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={handleDeleteTask}
+        title="Remove Task?"
+        message="This will remove this task from your queue. The lead will remain in your pipeline but won't satisfy the strategy step until scheduled again."
+        confirmLabel="Remove Task"
+        variant="warning"
+      />
+    </>
+  );
 };
 
 const ActionButton: React.FC<{ icon: React.ReactNode, label: string, href?: string, color: string }> = ({ icon, label, href, color }) => {

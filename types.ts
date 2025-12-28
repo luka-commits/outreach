@@ -51,6 +51,7 @@ export interface Lead {
   strategyId?: string;
   currentStepIndex: number;
   nextTaskDate?: string; // ISO string
+  nextTaskNote?: string;
   status: LeadStatus;
 
   createdAt: string;

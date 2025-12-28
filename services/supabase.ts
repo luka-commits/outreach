@@ -48,7 +48,9 @@ interface DbLead {
   search_query: string | null;
   strategy_id: string | null;
   current_step_index: number;
+  current_step_index: number;
   next_task_date: string | null;
+  next_task_note: string | null;
   status: string;
   created_at: string;
 }
@@ -135,6 +137,7 @@ const dbLeadToLead = (db: DbLead): Lead => ({
   strategyId: db.strategy_id || undefined,
   currentStepIndex: db.current_step_index,
   nextTaskDate: db.next_task_date || undefined,
+  nextTaskNote: db.next_task_note || undefined,
   status: db.status as Lead['status'],
   createdAt: db.created_at,
 });
@@ -167,6 +170,7 @@ const leadToDbLead = (lead: Lead, userId: string): Partial<DbLead> => ({
   strategy_id: lead.strategyId || null,
   current_step_index: lead.currentStepIndex,
   next_task_date: lead.nextTaskDate || null,
+  next_task_note: lead.nextTaskNote || null,
   status: lead.status,
   created_at: lead.createdAt,
 });
@@ -206,6 +210,11 @@ const strategyToDbStrategy = (strategy: Strategy, userId: string): Partial<DbStr
   description: strategy.description,
   steps: strategy.steps,
 });
+
+// Terminal statuses that stop future tasks from being generated
+// When a lead reaches one of these statuses, we clear next_task_date
+// but keep strategyId and currentStepIndex for reporting purposes
+const TERMINAL_STATUSES: Lead['status'][] = ['replied', 'qualified', 'disqualified'];
 
 const dbScrapeJobToScrapeJob = (db: DbScrapeJob): ScrapeJob => ({
   id: db.id,
@@ -378,9 +387,17 @@ export async function createLeads(leads: Lead[], userId: string): Promise<Lead[]
 }
 
 export async function updateLead(lead: Lead, userId: string): Promise<Lead> {
+  // Auto-stop: When status changes to a terminal status, clear next_task_date
+  // This prevents further tasks from appearing in TaskQueue
+  // We keep strategyId and currentStepIndex for reporting purposes
+  const leadToUpdate = { ...lead };
+  if (TERMINAL_STATUSES.includes(lead.status)) {
+    leadToUpdate.nextTaskDate = undefined;
+  }
+
   const { data, error } = await supabase
     .from('leads')
-    .update(leadToDbLead(lead, userId))
+    .update(leadToDbLead(leadToUpdate, userId))
     .eq('id', lead.id)
     .eq('user_id', userId)
     .select()

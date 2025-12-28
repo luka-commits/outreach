@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { Instagram, Facebook, Linkedin, Mail, Phone, Footprints, Settings2 } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Lead, OutreachGoals, Activity } from '../types';
 import { useAuth } from '../hooks/useAuth';
-import { useDashboardActivities } from '../hooks/queries/useActivitiesQuery';
+import { useDashboardActivities, useActivitiesPaginatedQuery } from '../hooks/queries/useActivitiesQuery';
 
 interface DashboardProps {
   leads: Lead[];
@@ -33,6 +34,42 @@ const Dashboard: React.FC<DashboardProps> = ({ leads, activities: _legacyActivit
   // Fetch activities with date range filtering (much more efficient!)
   const { user } = useAuth();
   const { data: activities = [] } = useDashboardActivities(user?.id, timeframe);
+
+  // Fetch last 7 days for the chart specifically
+  const chartStartDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6); // Last 7 days including today
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }, []);
+
+  const { data: chartActivities = [] } = useActivitiesPaginatedQuery(user?.id, {
+    startDate: chartStartDate,
+    limit: 5000
+  });
+
+  const chartData = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const dateKey = d.toISOString().split('T')[0];
+
+      const dayActivities = chartActivities.filter(a => a.timestamp.startsWith(dateKey)).length;
+
+      // Calculate total daily goal sum
+      const totalDailyGoal = Object.entries(goals).reduce((acc, [key, val]) => {
+        if (!disabledChannels.includes(key)) return acc + (val as number);
+        return acc;
+      }, 0);
+
+      const percentage = totalDailyGoal > 0 ? Math.min(100, Math.round((dayActivities / totalDailyGoal) * 100)) : 0;
+
+      days.push({ name: dayName, score: percentage, raw: dayActivities });
+    }
+    return days;
+  }, [chartActivities, goals, disabledChannels]);
 
   const toggleChannel = (channel: string) => {
     setDisabledChannels(prev =>

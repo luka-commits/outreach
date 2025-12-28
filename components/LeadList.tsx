@@ -229,14 +229,14 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
         </div>
       </header>
 
-      <div className={`bg-white border border-slate-200 rounded-[3rem] overflow-hidden shadow-sm flex-1 flex flex-col min-h-[600px] transition-opacity ${isLoading && !isPlaceholderData ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+      <div className={`bg-white border border-slate-200 rounded-[3rem] shadow-sm flex-1 flex flex-col min-h-[600px] transition-opacity ${isLoading && !isPlaceholderData ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
         {/* Table Header with Excel-style column filters */}
-        <div className="bg-slate-50/90 backdrop-blur-xl overflow-x-auto border-b border-slate-100">
+        <div className="bg-slate-50/90 backdrop-blur-xl border-b border-slate-100 rounded-t-[3rem]">
           <div className="grid grid-cols-[60px_minmax(180px,2fr)_minmax(140px,1.2fr)_minmax(140px,1.2fr)_100px_180px_130px_130px_50px] min-w-[1200px]">
-            <div className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">#</div>
+            <div className="px-4 py-5 text-xs font-black text-slate-400 uppercase tracking-wider text-center">#</div>
 
             {/* Prospect column - sortable, no filter */}
-            <div className="px-4 py-4">
+            <div className="px-4 py-5">
               <ColumnFilterDropdown
                 label="Prospect"
                 field="company_name"
@@ -258,13 +258,13 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
             </div>
 
             {/* Location column - not sortable, but filterable (would need dynamic options) */}
-            <div className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</div>
+            <div className="px-4 py-5 text-xs font-black text-slate-400 uppercase tracking-wider">Location</div>
 
             {/* Industry column - not sortable for now */}
-            <div className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Industry</div>
+            <div className="px-4 py-5 text-xs font-black text-slate-400 uppercase tracking-wider">Industry</div>
 
             {/* Trust/Rating column - sortable with range filter */}
-            <div className="px-4 py-4 flex justify-center">
+            <div className="px-4 py-5 flex justify-center">
               <ColumnFilterDropdown
                 label="Trust"
                 field="google_rating"
@@ -290,7 +290,7 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
             </div>
 
             {/* Sequence column - filterable with strategies */}
-            <div className="px-4 py-4 flex justify-center">
+            <div className="px-4 py-5 flex justify-center">
               <ColumnFilterDropdown
                 label="Sequence"
                 field="strategy_id"
@@ -313,7 +313,7 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
             </div>
 
             {/* Channels column - filterable */}
-            <div className="px-4 py-4 flex justify-center">
+            <div className="px-4 py-5 flex justify-center">
               <ColumnFilterDropdown
                 label="Channels"
                 field="channels"
@@ -336,7 +336,7 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
             </div>
 
             {/* Status column - sortable and filterable */}
-            <div className="px-4 py-4">
+            <div className="px-4 py-5">
               <ColumnFilterDropdown
                 label="Status"
                 field="status"

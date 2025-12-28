@@ -134,7 +134,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   );
 
   const handleManualSchedule = useCallback(
-    (hours: number | null, customDate?: string) => {
+    (hours: number | null, customDate?: string, note?: string) => {
       if (!lead) return;
       let nextDate: Date;
       if (customDate) {
@@ -149,6 +149,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       const updatedLead: Lead = {
         ...lead,
         nextTaskDate: nextDate.toISOString(),
+        nextTaskNote: note,
         status: 'in_progress',
       };
       onUpdate(updatedLead);

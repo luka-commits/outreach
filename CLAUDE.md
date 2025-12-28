@@ -1,5 +1,13 @@
 # CLAUDE.md - OutreachPilot
 
+> **IMPORTANT**: Keep this file up-to-date! When making changes to the codebase, update the relevant sections immediately:
+> - **New component** → Add to "Project Structure" and "Component Views" table
+> - **New hook** → Add to "Project Structure" under `hooks/queries/`
+> - **New API function** → Add to "Key API Functions" table
+> - **New database table/migration** → Add to "Database Schema" and "Database Migrations" list
+> - **New feature** → Add to "Recent Feature Updates" checklist
+> - **Bug fix** → Add to "Recent Feature Updates" if significant
+
 ## What is OutreachPilot?
 
 OutreachPilot is a sales outreach management SPA for tracking leads, scheduling follow-ups, and executing multi-step outreach strategies. It helps sales teams:
@@ -52,25 +60,31 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 ## Project Structure
 
 ```
-/src
+/ (root)
 ├── services/                    # API layer
-│   ├── supabase.ts              # All Supabase CRUD operations (~600 lines)
+│   ├── supabase.ts              # All Supabase CRUD operations (~750 lines)
 │   └── geminiService.ts         # AI message personalization
 ├── hooks/
 │   ├── queries/                 # React Query hooks
-│   │   ├── useLeadsPaginated.ts # Paginated lead list with filters
+│   │   ├── index.ts             # Barrel exports for all query hooks
+│   │   ├── useLeadsPaginated.ts # Paginated lead list with filters & sorting
+│   │   ├── useLeadQuery.ts      # Single lead by ID
 │   │   ├── useLeadsInfinite.ts  # Infinite scroll (50/page)
 │   │   ├── useLeadsQuery.ts     # Legacy all-leads hook (avoid)
 │   │   ├── useTasksQuery.ts     # Today's due tasks
-│   │   ├── useActivitiesQuery.ts# Activity log
+│   │   ├── useActivitiesQuery.ts# Activity log with pagination
+│   │   ├── useLeadActivitiesQuery.ts # Per-lead activity history
 │   │   ├── useStrategiesQuery.ts# Outreach strategies
 │   │   ├── useGoalsQuery.ts     # Daily outreach goals
-│   │   └── useLeadCountQuery.ts # Lead count for limits
+│   │   ├── useLeadCountQuery.ts # Lead count for subscription limits
+│   │   └── useScrapeJobsQuery.ts# Scrape job management & progress
 │   ├── useAuth.tsx              # Authentication context & provider
 │   └── useSubscription.ts       # Subscription tier & limits
 ├── components/
+│   ├── layout/                  # Layout wrapper components
 │   ├── Dashboard.tsx            # Overview & analytics with goal rings
-│   ├── LeadList.tsx             # Paginated pipeline view
+│   ├── LeadList.tsx             # Pipeline view with Excel-style filters & multi-sort
+│   ├── ColumnFilterDropdown.tsx # Excel-style column filter dropdowns
 │   ├── LeadDetail/              # Single lead view (folder)
 │   │   ├── index.tsx            # Main component
 │   │   ├── LeadHeader.tsx       # Editable lead info
@@ -81,10 +95,17 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 │   ├── TaskQueue.tsx            # Daily task scheduler (list/calendar/processing)
 │   ├── StrategyManager.tsx      # Strategy CRUD
 │   ├── CSVUpload.tsx            # Bulk import with duplicate detection
-│   ├── LeadFinder.tsx           # Lead discovery (scrape jobs)
+│   ├── LeadFinder.tsx           # Lead discovery with real-time progress
+│   ├── ScrapeProgressTimeline.tsx # Scrape job progress visualization
+│   ├── LeadAddForm.tsx          # Manual lead creation form
 │   ├── Reporting.tsx            # Analytics & metrics
+│   ├── SettingsView.tsx         # User settings & API keys
+│   ├── ViewRouter.tsx           # View routing logic
+│   ├── LandingPage.tsx          # Marketing/login page
+│   ├── PricingPage.tsx          # Subscription pricing display
 │   ├── Toast.tsx                # ToastProvider context
 │   ├── ConfirmModal.tsx         # Reusable confirmation dialog
+│   ├── LoadingSpinner.tsx       # Loading state component
 │   └── ErrorBoundary.tsx        # React error boundary
 ├── lib/
 │   └── queryClient.ts           # React Query config & query keys
@@ -92,12 +113,16 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 │   └── styles.ts                # Status colors, platform colors
 ├── types.ts                     # Type definitions
 ├── App.tsx                      # Root orchestration
-└── main.tsx                     # Entry point
+├── index.tsx                    # Entry point
+└── main.tsx                     # Vite entry
 
 /supabase
 ├── functions/
+│   ├── start-scrape/            # Initiates lead scraping jobs
+│   ├── scrape-callback/         # Webhook for scrape results
+│   ├── cancel-job/              # Cancels in-progress scrape jobs
 │   └── import-leads/            # Edge function for CSV processing
-└── migrations/                  # SQL migrations
+└── migrations/                  # SQL migrations (7 migration files)
 ```
 
 ---
@@ -239,6 +264,19 @@ not_contacted → in_progress → replied → qualified
                                       ↘ disqualified
 ```
 
+### Terminal Statuses (Auto-Stop)
+
+When a lead reaches a **terminal status**, the system automatically clears `next_task_date` to prevent further tasks from appearing in the TaskQueue. This is the "Auto-Stop" safety feature.
+
+**Terminal statuses:** `replied`, `qualified`, `disqualified`
+
+**Behavior:**
+- `next_task_date` is set to `null` → Lead disappears from TaskQueue
+- `strategyId` is **kept** → For reporting ("this lead came from Campaign X")
+- `currentStepIndex` is **kept** → For progress tracking
+
+**Implementation:** Located in `services/supabase.ts` in the `updateLead()` function.
+
 ---
 
 ## Strategy System
@@ -273,13 +311,49 @@ When a lead is assigned a strategy:
 | Component | Purpose | Key Features |
 |-----------|---------|--------------|
 | Dashboard | Overview & analytics | Goal progress rings, quick actions, activity chart |
-| LeadList | Pipeline view | Pagination, status/strategy/channel filters, CSV export |
+| LeadList | Pipeline view | Excel-style filters, multi-column sorting, pagination, CSV export |
 | LeadDetail | Single lead | Editable fields, strategy progress, activity composer |
 | TaskQueue | Daily tasks | List/calendar/processing modes, message personalization |
 | StrategyManager | Strategy CRUD | Create/edit multi-step sequences |
 | CSVUpload | Bulk import | Duplicate detection, field mapping |
-| LeadFinder | Lead discovery | Scrape job management |
+| LeadFinder | Lead discovery | Scrape job management with real-time progress |
 | Reporting | Analytics | Metrics and trends |
+| SettingsView | User settings | API key management, preferences |
+| LandingPage | Marketing/Auth | Login page with Google OAuth |
+| PricingPage | Subscriptions | Tier comparison, upgrade flow |
+
+---
+
+## Pipeline Features (LeadList)
+
+The Pipeline view includes advanced filtering and sorting capabilities:
+
+### Multi-Column Sorting
+- Click column headers to sort (ascending → descending → remove)
+- Hold to add secondary/tertiary sort columns
+- Visual badges show sort priority (1, 2, 3...)
+
+### Excel-Style Column Filters
+- **Status**: Multi-select checkboxes (not_contacted, in_progress, replied, etc.)
+- **Sequence**: Filter by assigned strategy or unassigned leads
+- **Channels**: Filter by available contact methods (Instagram, Facebook, etc.)
+- **Trust/Rating**: Range slider filter (0-5 stars)
+
+### Filter State
+```typescript
+// Array-based filters for multi-select
+status?: string[];           // Multiple statuses
+strategyId?: string[];       // Multiple strategies ('none' for unassigned)
+location?: string[];         // Multiple locations
+niche?: string[];            // Multiple industries
+channels?: ChannelFilter[];  // has_instagram, has_facebook, etc.
+ratingMin?: number;          // Minimum rating
+ratingMax?: number;          // Maximum rating
+
+// Multi-column sorting
+sortBy?: SortField[];        // Array of fields to sort by
+sortDirection?: SortDirection[]; // Corresponding directions
+```
 
 ---
 
@@ -293,6 +367,34 @@ generatePersonalizedMessage(companyName, contactName, baseTemplate)
 ```
 
 Used in TaskQueue's processing mode to customize messages before sending.
+
+---
+
+## Lead Finder (Scrape Jobs)
+
+The Lead Finder feature allows users to discover new leads by scraping Google Maps data.
+
+### Architecture
+1. **Frontend** (`LeadFinder.tsx`) - Job creation UI, progress display
+2. **Edge Functions**:
+   - `start-scrape/` - Validates input, creates job record, triggers Modal
+   - `scrape-callback/` - Receives results webhook, inserts leads
+   - `cancel-job/` - Updates job status to cancelled
+3. **External Service** - Modal.com runs the actual scraping
+4. **Progress Tracking** - Real-time updates via `ScrapeProgressTimeline.tsx`
+
+### Scrape Job States
+```
+pending → processing → completed
+                    ↘ failed
+        ↘ cancelled
+```
+
+### Database Fields (scrape_jobs)
+```sql
+id, user_id, niche, location, lead_count, expanded_radius,
+status, created_at, progress_current, progress_total, error_message
+```
 
 ---
 
@@ -321,14 +423,20 @@ Checked via `useSubscription()` hook which reads `profiles.subscription_status`.
 
 | Function | Purpose |
 |----------|---------|
-| `getLeadsPaginated()` | Paginated leads with filters |
+| `getLeadsPaginated()` | Paginated leads with multi-filters & multi-sort |
+| `getLeadById()` | Single lead by ID |
 | `getDueTasks()` | Leads with tasks due today |
 | `createLead()` / `updateLead()` / `deleteLead()` | Lead CRUD |
 | `createActivity()` | Log outreach activity |
 | `getActivitiesPaginated()` | Paginated activities with date range |
+| `getActivitiesByLead()` | Activities for a specific lead |
 | `getStrategies()` | User's strategies |
 | `getLeadCountsByStatus()` | Dashboard status counts |
 | `checkDuplicateCompanies()` | CSV import duplicate check |
+| `getUniqueColumnValues()` | Distinct values for filter dropdowns |
+| `getScrapeJobs()` | User's scrape job history |
+| `getScrapeJobById()` | Single scrape job with progress |
+| `createScrapeJob()` / `cancelScrapeJob()` | Scrape job management |
 
 ---
 
@@ -356,9 +464,21 @@ AuthGuard component in App.tsx protects routes.
 
 ## Launch Status & Production Readiness
 
-**Current Version**: 1.0.0
+**Current Version**: 1.1.0
+**Last Updated**: December 2024
 **Last Security Audit**: December 2024
 **Readiness Score**: 10/10 (production ready)
+
+### Recent Feature Updates (Dec 2024)
+
+- [x] Excel-style column filters with multi-select checkboxes
+- [x] Multi-column sorting with priority badges
+- [x] Lead Finder with real-time scrape progress tracking
+- [x] Settings view with API key management
+- [x] Auto-Stop: Terminal statuses (replied/qualified/disqualified) clear next_task_date
+- [x] Fixed strategy selection sync issues
+- [x] Fixed lead position jumping in Pipeline
+- [x] Portal-based dropdowns to avoid z-index issues
 
 ### Completed Security Improvements (Dec 2024)
 
@@ -425,3 +545,199 @@ MODAL_WEBHOOK_URL=your-modal-endpoint
 - Lead deduplication/merge
 - A/B testing for message templates
 - Bundle Tailwind CSS locally
+
+---
+
+## Development Guidelines
+
+### Critical Rules (NEVER Break These)
+
+1. **User Isolation**: Every Supabase query MUST filter by `user_id`
+   - Check: Does the query include `.eq('user_id', userId)` or equivalent?
+   - RLS is backup, not primary defense - always filter explicitly
+   - Applies to: SELECT, UPDATE, DELETE operations
+
+2. **Authentication**: Never bypass AuthGuard or remove auth checks
+   - All routes must be wrapped in AuthGuard (App.tsx)
+   - Edge Functions must verify JWT via `supabase.auth.getUser()`
+   - Never expose user data without authentication
+
+3. **Input Validation**: Validate all external input
+   - Edge Functions: Use `sanitizeString()`, `sanitizeUrl()`, etc.
+   - Forms: Validate before mutation (email format, URL format, required fields)
+   - CSVs: Check file type, row counts, field formats
+
+4. **Error Handling**: Never swallow errors silently
+   - Always show user feedback via `showToast()`
+   - Log errors to console for debugging
+   - Throw errors from services layer, catch in components
+
+5. **Optimistic Updates**: Always implement rollback
+   - Use `onMutate` → `onError` → `onSettled` pattern
+   - Snapshot previous state before optimistic update
+   - Rollback on error using snapshot
+
+### Before Deploying Checklist
+
+- [ ] Run `npm run build` - must complete without errors
+- [ ] Run `npm run lint` - check for code quality issues
+- [ ] Test authentication flow (sign in, sign out, refresh)
+- [ ] Test core CRUD operations (create lead, update, delete)
+- [ ] Verify RLS by checking Network tab - no cross-user data leaks
+- [ ] Check browser console for errors
+- [ ] Test on mobile viewport
+
+### NPM Scripts
+
+```bash
+npm run dev          # Start development server
+npm run build        # Production build
+npm run lint         # Check for ESLint issues
+npm run lint:fix     # Auto-fix ESLint issues
+npm run type-check   # TypeScript type checking
+npm run format       # Format code with Prettier
+npm run format:check # Verify formatting
+```
+
+### Code Quality Standards
+
+**TypeScript:**
+- Strict mode is enabled - avoid `any` types
+- Use proper typing or `unknown` for dynamic data
+- Define interfaces for all data structures
+- Use optional chaining (`?.`) for nullable access
+
+**React Query:**
+- Use query keys from `lib/queryClient.ts` (never raw strings)
+- Invalidate related queries after mutations
+- Use `enabled: !!userId` to prevent queries without auth
+
+**Components:**
+- Keep components focused - extract logic to hooks
+- Use React.memo() for list items to prevent re-renders
+- Handle loading and error states explicitly
+
+### File Modification Safety
+
+**High-Risk Files (Extra Caution Required):**
+
+| File | Risk | Why |
+|------|------|-----|
+| `services/supabase.ts` | Critical | All data access - breaking this breaks everything |
+| `hooks/useAuth.tsx` | Critical | Authentication - breaking this locks out users |
+| `lib/queryClient.ts` | High | Query keys - wrong keys = stale data |
+| `supabase/migrations/*` | Critical | Database schema - can cause data loss |
+| `App.tsx` | High | Route guards, context providers |
+
+**Safe to Modify:**
+- Individual view components (Dashboard, LeadList, Reporting, etc.)
+- Styling changes (Tailwind classes)
+- Adding new components
+- Adding new hooks (following existing patterns)
+
+### Adding New Features
+
+**1. New Database Table:**
+```sql
+-- Create migration in supabase/migrations/YYYYMMDD_description.sql
+CREATE TABLE new_table (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  -- other columns...
+  created_at timestamptz DEFAULT now()
+);
+
+-- ALWAYS add RLS policies
+ALTER TABLE new_table ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own data" ON new_table
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own data" ON new_table
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+-- Add UPDATE/DELETE policies as needed
+```
+
+**2. New API Function:**
+```typescript
+// In services/supabase.ts
+export async function getNewData(userId: string): Promise<NewData[]> {
+  const { data, error } = await supabase
+    .from('new_table')
+    .select('*')
+    .eq('user_id', userId);  // ALWAYS filter by user_id
+
+  if (error) throw error;
+  return data.map(transformFromDb);
+}
+```
+
+**3. New React Query Hook:**
+```typescript
+// In hooks/queries/useNewDataQuery.ts
+export function useNewData() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: queryKeys.newData(user?.id),
+    queryFn: () => getNewData(user!.id),
+    enabled: !!user?.id,  // Prevent query without auth
+  });
+}
+```
+
+**4. New Component:**
+- Add to `components/`
+- Document in CLAUDE.md project structure
+- Handle loading/error states
+- Use existing patterns (see similar components)
+
+### Prohibited Actions
+
+- Do NOT disable RLS policies
+- Do NOT remove `user_id` filters from queries
+- Do NOT store secrets in client-side code
+- Do NOT use `dangerouslySetInnerHTML` without sanitization
+- Do NOT bypass AuthGuard for protected routes
+- Do NOT delete migration files (they're history)
+- Do NOT commit `.env.local` or any secrets
+
+### Multi-Tenant Considerations
+
+This app serves multiple users with thousands of leads each:
+
+1. **Query Performance:**
+   - All lead queries have `user_id` index
+   - Use pagination (never load all leads at once)
+   - Use `limit` and `offset` for large datasets
+
+2. **Data Isolation:**
+   - RLS policies prevent cross-user access at DB level
+   - Frontend always filters by `user_id` as defense-in-depth
+   - Never trust client-provided user IDs for other users
+
+3. **Rate Limiting:**
+   - Edge Functions have built-in Supabase rate limits
+   - Consider adding custom limits for expensive operations
+
+### Testing Changes Manually
+
+Since no automated tests exist, manually verify:
+
+1. **Auth Flow:**
+   - Sign out → Sign in with Google
+   - Refresh page → Still logged in
+   - Check no console errors
+
+2. **Data Isolation:**
+   - Create test lead
+   - Check Network tab → user_id in response matches your ID
+   - No other users' data visible
+
+3. **CRUD Operations:**
+   - Create → Shows in list
+   - Update → Changes persist after refresh
+   - Delete → Removed from list and database
+
+4. **Error Handling:**
+   - Turn off network → See error toast
+   - Invalid input → See validation message

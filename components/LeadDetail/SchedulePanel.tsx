@@ -3,25 +3,26 @@ import { Calendar, Clock, CheckCircle2, Bell } from 'lucide-react';
 
 interface SchedulePanelProps {
   initialDate?: string;
-  onSchedule: (hours: number | null, customDate?: string) => void;
+  onSchedule: (hours: number | null, customDate?: string, note?: string) => void;
 }
 
 const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSchedule }) => {
   const [schedulingDate, setSchedulingDate] = useState(
     initialDate ? initialDate.substring(0, 16) : ''
   );
+  const [note, setNote] = useState('');
 
   const setNextMorning = () => {
     const date = new Date();
     date.setDate(date.getDate() + 1);
     date.setHours(9, 0, 0, 0);
-    onSchedule(null, date.toISOString());
+    onSchedule(null, date.toISOString(), note);
   };
 
   const setEndOfDay = () => {
     const date = new Date();
     date.setHours(17, 0, 0, 0);
-    onSchedule(null, date.toISOString());
+    onSchedule(null, date.toISOString(), note);
   };
 
   return (
@@ -38,12 +39,12 @@ const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSched
           <SchedulePreset
             icon={<Clock size={16} />}
             label="In 1 Hr"
-            onClick={() => onSchedule(1)}
+            onClick={() => onSchedule(1, undefined, note)}
           />
           <SchedulePreset
             icon={<Calendar size={16} />}
             label="Tomorrow"
-            onClick={() => onSchedule(24)}
+            onClick={() => onSchedule(24, undefined, note)}
           />
           <SchedulePreset
             icon={<CheckCircle2 size={16} className="text-indigo-500" />}
@@ -57,28 +58,30 @@ const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSched
           />
         </div>
 
-        <div className="space-y-3">
-          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
-            Specify Exact Appointment
-          </label>
-          <div className="flex flex-col md:flex-row gap-3">
-            <input
-              type="datetime-local"
-              value={schedulingDate}
-              onChange={(e) => setSchedulingDate(e.target.value)}
-              className="flex-1 px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all"
-            />
-            <button
-              onClick={() => onSchedule(null, schedulingDate)}
-              disabled={!schedulingDate}
-              className="px-8 py-4 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 disabled:bg-slate-200 shadow-xl shadow-indigo-100 transition-all"
-            >
-              Set Appointment
-            </button>
           </div>
         </div>
-      </div>
-    </section>
+
+        <div className="space-y-3">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
+            Add Note (Optional)
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="E.g., Follow up on the pricing proposal..."
+            className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-medium text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all h-24 resize-none"
+          />
+        </div>
+
+        <button
+          onClick={() => onSchedule(null, schedulingDate, note)}
+          disabled={!schedulingDate}
+          className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 disabled:bg-slate-200 shadow-xl shadow-indigo-100 transition-all"
+        >
+          Set Appointment
+        </button>
+      </div >
+    </section >
   );
 });
 

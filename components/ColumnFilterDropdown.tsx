@@ -152,7 +152,7 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
       <button
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-left group hover:text-indigo-600 transition-colors ${
+        className={`flex items-center gap-2 text-xs font-black uppercase tracking-wider text-left group hover:text-indigo-600 transition-colors ${
           hasActiveFilter ? 'text-indigo-600' : 'text-slate-400'
         }`}
       >
@@ -160,13 +160,13 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
 
         {/* Sort indicator */}
         {sortable && (
-          <span className="flex flex-col -space-y-1 opacity-60 group-hover:opacity-100">
+          <span className="flex flex-col -space-y-1.5 opacity-60 group-hover:opacity-100">
             <ChevronUp
-              size={10}
+              size={12}
               className={sortDirection === 'asc' ? 'text-indigo-600 opacity-100' : ''}
             />
             <ChevronDown
-              size={10}
+              size={12}
               className={sortDirection === 'desc' ? 'text-indigo-600 opacity-100' : ''}
             />
           </span>
@@ -181,7 +181,7 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
 
         {/* Filter active indicator */}
         {hasActiveFilter && (
-          <Filter size={10} className="text-indigo-600 fill-indigo-600" />
+          <Filter size={12} className="text-indigo-600 fill-indigo-600" />
         )}
       </button>
 
