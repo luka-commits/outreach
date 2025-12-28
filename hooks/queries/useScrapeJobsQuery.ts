@@ -43,16 +43,8 @@ export function useCreateScrapeJobMutation(userId: string | undefined) {
       const job = await api.createScrapeJob(params, userId!);
 
       // 2. Call start-scrape Edge Function (fetches API keys server-side)
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
       const session = await api.getSession();
-
-      console.log(' Debug: Starting Scrape...');
-      console.log(' Debug: URL', `${supabaseUrl}/functions/v1/start-scrape`);
-      console.log(' Debug: Session Present?', !!session);
-      console.log(' Debug: Token Present?', !!session?.access_token);
-      if (session?.access_token) {
-        console.log(' Debug: Token Preview', session.access_token.substring(0, 10) + '...');
-      }
 
       if (!session?.access_token) {
         await api.updateScrapeJobStatus(job.id, userId!, 'failed');
