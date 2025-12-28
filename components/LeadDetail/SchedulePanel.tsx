@@ -78,7 +78,7 @@ const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSched
       >
         Set Appointment
       </button>
-    </div >
+
     </section >
   );
 });
