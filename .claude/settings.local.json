@@ -15,7 +15,9 @@
       "Bash(curl:*)",
       "Bash(timeout 20 modal app:*)",
       "Bash(python3:*)",
-      "Bash(modal app list:*)"
+      "Bash(modal app list:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

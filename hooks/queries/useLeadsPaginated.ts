@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../../services/supabase';
-import { LeadFilters } from '../../services/supabase';
+import { LeadFilters, PaginatedResponse } from '../../services/supabase';
 import { queryKeys } from '../../lib/queryClient';
 import { Lead } from '../../types';
 
@@ -13,6 +13,9 @@ export function useLeadsPaginatedQuery(userId: string | undefined, filters: Lead
     });
 }
 
+// Type for mutation variables that can be either a Lead object or a string ID
+type MutationVariables = Lead | Lead[] | string;
+
 /**
  * We also need a mutation hook that knows how to invalidate the paginated queries.
  * When a lead is updated, we might need to refresh the list.
@@ -20,7 +23,7 @@ export function useLeadsPaginatedQuery(userId: string | undefined, filters: Lead
 export function usePaginatedLeadMutations(userId: string | undefined) {
     const queryClient = useQueryClient();
 
-    const invalidateLeads = (data: any, variables: any) => {
+    const invalidateLeads = (_data: Lead | Lead[] | void | null, variables: MutationVariables) => {
         // Invalidate list
         queryClient.invalidateQueries({ queryKey: queryKeys.leads(userId!) });
 
@@ -29,10 +32,12 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
 
         // If we updated/deleted a specific lead, invalidate that lead's detail query
         // variables is the argument passed to mutate (Lead or id)
-        const leadId = variables?.id || (typeof variables === 'string' ? variables : null);
+        const leadId = typeof variables === 'object' && !Array.isArray(variables)
+            ? variables.id
+            : (typeof variables === 'string' ? variables : null);
 
-        if (leadId) {
-            queryClient.invalidateQueries({ queryKey: ['lead', leadId, userId] });
+        if (leadId && userId) {
+            queryClient.invalidateQueries({ queryKey: queryKeys.lead(userId, leadId) });
         }
     };
 
@@ -55,13 +60,14 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
                 const previousQueries = queryClient.getQueriesData({ queryKey: queryKeys.leads(userId!) });
 
                 // Optimistically update all matching queries
-                queryClient.setQueriesData({ queryKey: queryKeys.leads(userId!) }, (old: any) => {
+                type QueryData = Lead[] | PaginatedResponse<Lead> | undefined;
+                queryClient.setQueriesData<QueryData>({ queryKey: queryKeys.leads(userId!) }, (old) => {
                     // Case 1: Full list (Lead[])
                     if (Array.isArray(old)) {
                         return old.map(l => l.id === updatedLead.id ? { ...l, ...updatedLead } : l);
                     }
                     // Case 2: Paginated response ({ data: Lead[], count: number })
-                    else if (old && old.data && Array.isArray(old.data)) {
+                    else if (old && 'data' in old && Array.isArray(old.data)) {
                         return {
                             ...old,
                             data: old.data.map((l: Lead) => l.id === updatedLead.id ? { ...l, ...updatedLead } : l)
@@ -71,12 +77,14 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
                 });
 
                 // Optimistically update the single lead detail view
-                queryClient.setQueryData(['lead', updatedLead.id, userId], (old: Lead | undefined) => {
-                    if (old) {
-                        return { ...old, ...updatedLead };
-                    }
-                    return old;
-                });
+                if (userId) {
+                    queryClient.setQueryData<Lead>(queryKeys.lead(userId, updatedLead.id), (old) => {
+                        if (old) {
+                            return { ...old, ...updatedLead };
+                        }
+                        return old;
+                    });
+                }
 
                 return { previousQueries };
             },
@@ -88,7 +96,9 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
                     });
                 }
                 // Rollback single lead (simple invalidation is safer or refetch)
-                queryClient.invalidateQueries({ queryKey: ['lead', newLead.id, userId] });
+                if (userId) {
+                    queryClient.invalidateQueries({ queryKey: queryKeys.lead(userId, newLead.id) });
+                }
             },
             onSettled: (_data, _err, variables) => {
                 // Invalidate to ensure consistency

@@ -1,7 +1,10 @@
 project_id = "gdlkwpmhxjaxialgvdyc"
 
 [functions.start-scrape]
+# JWT verification handled manually in function code (getUser validation)
+# Keeps verify_jwt=false for compatibility but auth is still enforced
 verify_jwt = false
 
 [functions.scrape-callback]
+# Callback from Modal webhook - uses secret-based auth instead of JWT
 verify_jwt = false

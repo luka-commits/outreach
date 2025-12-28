@@ -23,7 +23,7 @@ export async function generatePersonalizedMessage(
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: `
         Help me personalize this outreach message.
         Company: ${companyName}

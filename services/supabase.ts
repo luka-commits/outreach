@@ -4,6 +4,14 @@ import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, ScrapeJob } from
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// Validate required environment variables at startup
+if (!supabaseUrl || !supabaseAnonKey) {
+  const missing = [];
+  if (!supabaseUrl) missing.push('VITE_SUPABASE_URL');
+  if (!supabaseAnonKey) missing.push('VITE_SUPABASE_ANON_KEY');
+  throw new Error(`Missing required environment variables: ${missing.join(', ')}. Check your .env.local file.`);
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Get the current session (for auth headers in Edge Function calls)

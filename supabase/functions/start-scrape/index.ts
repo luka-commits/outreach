@@ -1,10 +1,24 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+// CORS configuration - restrict to allowed origins in production
+const getAllowedOrigin = (req: Request): string => {
+  const origin = req.headers.get('Origin') || '';
+  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
+
+  // In development or if no origins configured, allow the request origin
+  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
+    return origin || '*';
+  }
+
+  // Default to first allowed origin if request origin not in list
+  return allowedOrigins[0];
+};
+
+const getCorsHeaders = (req: Request) => ({
+  'Access-Control-Allow-Origin': getAllowedOrigin(req),
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+});
 
 interface StartScrapeRequest {
   job_id: string;
@@ -15,6 +29,8 @@ interface StartScrapeRequest {
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
