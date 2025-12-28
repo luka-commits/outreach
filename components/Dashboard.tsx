@@ -33,6 +33,7 @@ const Dashboard: React.FC<DashboardProps> = ({ leads, activities: _legacyActivit
 
   // Fetch activities with date range filtering (much more efficient!)
   const { user } = useAuth();
+  // Safe default for activities
   const { data: activities = [] } = useDashboardActivities(user?.id, timeframe);
 
   // Fetch last 7 days for the chart specifically
@@ -196,6 +197,55 @@ const Dashboard: React.FC<DashboardProps> = ({ leads, activities: _legacyActivit
                       </div>
                     );
                   })}
+                  {/* Activity Chart Section */}
+                  <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-xl shadow-slate-100/50">
+                    <h3 className="text-2xl font-black text-slate-900 mb-6 px-4">Daily Consistency (Last 7 Days)</h3>
+                    <div className="h-[300px] w-full">
+                      {chartData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                            <XAxis
+                              dataKey="name"
+                              axisLine={false}
+                              tickLine={false}
+                              tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 700 }}
+                              dy={10}
+                            />
+                            <YAxis
+                              axisLine={false}
+                              tickLine={false}
+                              tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 700 }}
+                              tickFormatter={(value) => `${value}%`}
+                            />
+                            <Tooltip
+                              contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                              cursor={{ stroke: '#6366f1', strokeWidth: 2 }}
+                              formatter={(value: number) => [`${value}% Goal Achieved`, 'Performance']}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="score"
+                              stroke="#4f46e5"
+                              strokeWidth={3}
+                              fillOpacity={1}
+                              fill="url(#colorScore)"
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-slate-400 font-bold">
+                          Loading Chart...
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

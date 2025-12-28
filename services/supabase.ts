@@ -170,7 +170,7 @@ const leadToDbLead = (lead: Lead, userId: string): Partial<DbLead> => ({
   strategy_id: lead.strategyId || null,
   current_step_index: lead.currentStepIndex,
   next_task_date: lead.nextTaskDate || null,
-  next_task_note: lead.nextTaskNote || null,
+  // next_task_note: lead.nextTaskNote || null, // DISABLED TO PREVENT CRASH - DB MIGRATION PENDING
   status: lead.status,
   created_at: lead.createdAt,
 });
