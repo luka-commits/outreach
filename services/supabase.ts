@@ -671,11 +671,16 @@ export interface PaginationParams {
   offset?: number;
 }
 
+export type SortField = 'created_at' | 'company_name' | 'google_rating' | 'status';
+export type SortDirection = 'asc' | 'desc';
+
 export interface LeadFilters extends PaginationParams {
   status?: Lead['status'] | 'all';
   strategyId?: string | 'all';
   search?: string;
   channelFilter?: 'all' | 'all_socials' | 'ig_only' | 'no_socials' | 'has_email' | 'has_phone';
+  sortBy?: SortField;
+  sortDirection?: SortDirection;
 }
 
 export interface PaginatedResponse<T> {
@@ -692,13 +697,23 @@ export async function getLeadsPaginated(
   userId: string,
   filters: LeadFilters = {}
 ): Promise<PaginatedResponse<Lead>> {
-  const { limit = 50, offset = 0, status, strategyId, search, channelFilter } = filters;
+  const {
+    limit = 50,
+    offset = 0,
+    status,
+    strategyId,
+    search,
+    channelFilter,
+    sortBy = 'created_at',
+    sortDirection = 'desc'
+  } = filters;
 
   let query = supabase
     .from('leads')
     .select('*', { count: 'exact' })
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
+    .order(sortBy, { ascending: sortDirection === 'asc' })
+    .order('id', { ascending: true }) // Secondary sort for stable ordering
     .range(offset, offset + limit - 1);
 
   // Apply status filter

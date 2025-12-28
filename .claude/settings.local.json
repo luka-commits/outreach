@@ -17,7 +17,8 @@
       "Bash(python3:*)",
       "Bash(modal app list:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

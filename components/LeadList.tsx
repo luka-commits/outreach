@@ -1,9 +1,10 @@
 import React, { useState, useCallback, memo, useDeferredValue, useEffect } from 'react';
-import { Search, Plus, ChevronRight, Instagram, Mail, Phone, Facebook, Users, Globe, Filter, MapPin, Target, Star, ChevronDown, ListFilter, X, Download, Loader2, ChevronLeft } from 'lucide-react';
+import { Search, Plus, ChevronRight, Instagram, Mail, Phone, Facebook, Users, Globe, Filter, MapPin, Target, Star, ChevronDown, ListFilter, X, Download, Loader2, ChevronLeft, ArrowUp, ArrowDown } from 'lucide-react';
 import { Lead, LeadStatus, Strategy } from '../types';
 import { getLeadStatusStyle, getRatingColor } from '../utils/styles';
 import { useAuth } from '../hooks/useAuth';
 import { useLeadsPaginatedQuery } from '../hooks/queries/useLeadsPaginated';
+import { SortField, SortDirection } from '../services/supabase';
 
 // Utility: Show only first niche term to keep table clean
 const getFirstNiche = (niche?: string): string => {
@@ -31,6 +32,8 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('any');
   const [pageSize, setPageSize] = useState<PageSize>(25);
   const [currentPage, setCurrentPage] = useState(1);
+  const [sortBy, setSortBy] = useState<SortField>('created_at');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   // Defer search value to avoid hammering the API
   const deferredSearch = useDeferredValue(search);
@@ -42,8 +45,23 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
     status: statusFilter,
     strategyId: strategyFilter,
     search: deferredSearch,
-    channelFilter: channelFilter
+    channelFilter: channelFilter,
+    sortBy,
+    sortDirection
   });
+
+  // Handle column sort toggle
+  const handleSort = useCallback((field: SortField) => {
+    if (sortBy === field) {
+      // Toggle direction if same field
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New field, default to desc
+      setSortBy(field);
+      setSortDirection('desc');
+    }
+    setCurrentPage(1);
+  }, [sortBy]);
 
   const leads = data?.data || [];
   const totalCount = data?.count || 0;
@@ -207,13 +225,13 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
         <div className="bg-slate-50/90 backdrop-blur-xl overflow-x-auto">
           <div className="grid grid-cols-[60px_minmax(180px,2fr)_minmax(140px,1.2fr)_minmax(140px,1.2fr)_100px_180px_130px_130px_50px] min-w-[1200px]">
             <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">#</div>
-            <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Prospect</div>
+            <SortableHeader field="company_name" label="Prospect" currentSort={sortBy} direction={sortDirection} onSort={handleSort} />
             <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</div>
             <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Industry</div>
-            <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Trust</div>
+            <SortableHeader field="google_rating" label="Trust" currentSort={sortBy} direction={sortDirection} onSort={handleSort} center />
             <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Sequence</div>
             <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Channels</div>
-            <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</div>
+            <SortableHeader field="status" label="Status" currentSort={sortBy} direction={sortDirection} onSort={handleSort} />
             <div className="px-4 py-5"></div>
           </div>
         </div>
@@ -428,5 +446,31 @@ const Indicator = memo<{ active: boolean; icon: React.ReactNode; activeClass: st
 );
 
 Indicator.displayName = 'Indicator';
+
+const SortableHeader = memo<{
+  field: SortField;
+  label: string;
+  currentSort: SortField;
+  direction: SortDirection;
+  onSort: (field: SortField) => void;
+  center?: boolean;
+}>(({ field, label, currentSort, direction, onSort, center }) => {
+  const isActive = currentSort === field;
+  return (
+    <button
+      onClick={() => onSort(field)}
+      className={`px-4 py-5 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 transition-colors hover:text-indigo-600 ${center ? 'justify-center' : ''} ${isActive ? 'text-indigo-600' : 'text-slate-400'}`}
+    >
+      {label}
+      {isActive ? (
+        direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+      ) : (
+        <ArrowDown size={12} className="opacity-0 group-hover:opacity-50" />
+      )}
+    </button>
+  );
+});
+
+SortableHeader.displayName = 'SortableHeader';
 
 export default LeadList;

@@ -100,10 +100,9 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
                     queryClient.invalidateQueries({ queryKey: queryKeys.lead(userId, newLead.id) });
                 }
             },
-            onSettled: (_data, _err, variables) => {
-                // Invalidate to ensure consistency
-                invalidateLeads(null, variables);
-            }
+            // Note: We intentionally don't use onSettled here to avoid refetching
+            // The optimistic update handles the UI, and React Query's staleTime
+            // will eventually refresh the data. This prevents lead position jumping.
         }),
         deleteLead: useMutation({
             mutationFn: (id: string) => api.deleteLead(id, userId!),
