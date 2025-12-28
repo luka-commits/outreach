@@ -1,0 +1,7 @@
+project_id = "gdlkwpmhxjaxialgvdyc"
+
+[functions.start-scrape]
+verify_jwt = false
+
+[functions.scrape-callback]
+verify_jwt = false

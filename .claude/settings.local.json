@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(timeout 5 npm run dev)",
+      "Bash(npm run dev:*)",
+      "Bash(npx supabase login)",
+      "Bash(modal deploy:*)",
+      "Bash(open http://localhost:3019)",
+      "Bash(supabase --version:*)",
+      "Bash(npx supabase:*)",
+      "Bash(modal app logs:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "Bash(timeout 20 modal app:*)",
+      "Bash(python3:*)",
+      "Bash(modal app list:*)"
+    ]
+  }
+}
