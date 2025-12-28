@@ -1,10 +1,11 @@
-import React, { useState, useCallback, memo, useDeferredValue, useEffect } from 'react';
+import React, { useState, useCallback, memo, useDeferredValue, useEffect, useMemo } from 'react';
 import { Search, Plus, ChevronRight, Instagram, Mail, Phone, Facebook, Users, Globe, Filter, MapPin, Target, Star, ChevronDown, ListFilter, X, Download, Loader2, ChevronLeft, ArrowUp, ArrowDown } from 'lucide-react';
 import { Lead, LeadStatus, Strategy } from '../types';
 import { getLeadStatusStyle, getRatingColor } from '../utils/styles';
 import { useAuth } from '../hooks/useAuth';
 import { useLeadsPaginatedQuery } from '../hooks/queries/useLeadsPaginated';
-import { SortField, SortDirection } from '../services/supabase';
+import { SortField, SortDirection, LeadFilters } from '../services/supabase';
+import { ColumnFilterDropdown } from './ColumnFilterDropdown';
 
 // Utility: Show only first niche term to keep table clean
 const getFirstNiche = (niche?: string): string => {
@@ -22,56 +23,100 @@ interface LeadListProps {
   onUpdateLead: (lead: Lead) => void;
 }
 
-type ChannelFilter = 'all_socials' | 'ig_only' | 'no_socials' | 'has_email' | 'has_phone' | 'any';
+// Channel filter type for array-based filtering
+type ChannelFilter = LeadFilters['channels'];
+
+// Status options for the filter dropdown
+const STATUS_OPTIONS = [
+  { value: 'not_contacted', label: 'New Leads' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'replied', label: 'Responded' },
+  { value: 'qualified', label: 'Qualified' },
+  { value: 'disqualified', label: 'Not a Fit' },
+];
+
+// Channel options for the filter dropdown
+const CHANNEL_OPTIONS = [
+  { value: 'has_instagram', label: 'Has Instagram' },
+  { value: 'has_facebook', label: 'Has Facebook' },
+  { value: 'has_linkedin', label: 'Has LinkedIn' },
+  { value: 'has_email', label: 'Has Email' },
+  { value: 'has_phone', label: 'Has Phone' },
+];
 
 const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpload, onUpdateLead }) => {
   const { user } = useAuth();
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<LeadStatus | 'all'>('all');
-  const [strategyFilter, setStrategyFilter] = useState<string | 'all'>('all');
-  const [channelFilter, setChannelFilter] = useState<ChannelFilter>('any');
+
+  // Array-based filters for Excel-style multi-select
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [strategyFilter, setStrategyFilter] = useState<string[]>([]);
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>([]);
+  const [ratingRange, setRatingRange] = useState<{ min?: number; max?: number }>({});
+
   const [pageSize, setPageSize] = useState<PageSize>(25);
   const [currentPage, setCurrentPage] = useState(1);
-  const [sortBy, setSortBy] = useState<SortField>('created_at');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Multi-column sort: arrays of fields and their directions
+  const [sortFields, setSortFields] = useState<SortField[]>(['created_at']);
+  const [sortDirections, setSortDirections] = useState<SortDirection[]>(['desc']);
 
   // Defer search value to avoid hammering the API
   const deferredSearch = useDeferredValue(search);
 
-  // Query for data
-  const { data, isLoading, isPlaceholderData } = useLeadsPaginatedQuery(user?.id, {
+  // Build filters object for query
+  const filters: LeadFilters = useMemo(() => ({
     limit: pageSize,
     offset: (currentPage - 1) * pageSize,
-    status: statusFilter,
-    strategyId: strategyFilter,
-    search: deferredSearch,
-    channelFilter: channelFilter,
-    sortBy,
-    sortDirection
-  });
+    status: statusFilter.length > 0 ? statusFilter : undefined,
+    strategyId: strategyFilter.length > 0 ? strategyFilter : undefined,
+    channels: channelFilter && channelFilter.length > 0 ? channelFilter : undefined,
+    ratingMin: ratingRange.min,
+    ratingMax: ratingRange.max,
+    search: deferredSearch || undefined,
+    sortBy: sortFields,
+    sortDirection: sortDirections,
+  }), [pageSize, currentPage, statusFilter, strategyFilter, channelFilter, ratingRange, deferredSearch, sortFields, sortDirections]);
 
-  // Handle column sort toggle
-  const handleSort = useCallback((field: SortField) => {
-    if (sortBy === field) {
-      // Toggle direction if same field
-      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
-    } else {
-      // New field, default to desc
-      setSortBy(field);
-      setSortDirection('desc');
-    }
+  // Query for data
+  const { data, isLoading, isPlaceholderData } = useLeadsPaginatedQuery(user?.id, filters);
+
+  // Reset sort to default
+  const resetSort = useCallback(() => {
+    setSortFields(['created_at']);
+    setSortDirections(['desc']);
     setCurrentPage(1);
-  }, [sortBy]);
+  }, []);
 
   const leads = data?.data || [];
   const totalCount = data?.count || 0;
   const totalPages = Math.ceil(totalCount / pageSize);
 
-  // Reset to page 1 when filters change (search is handled by useEffect below)
-  const handleFilterChange = useCallback((setter: (v: any) => void, value: any) => {
-    setter(value);
+  // Count active filters for display
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (statusFilter.length > 0) count++;
+    if (strategyFilter.length > 0) count++;
+    if (channelFilter && channelFilter.length > 0) count++;
+    if (ratingRange.min !== undefined || ratingRange.max !== undefined) count++;
+    return count;
+  }, [statusFilter, strategyFilter, channelFilter, ratingRange]);
+
+  // Clear all filters
+  const clearAllFilters = useCallback(() => {
+    setStatusFilter([]);
+    setStrategyFilter([]);
+    setChannelFilter([]);
+    setRatingRange({});
+    resetSort();
     setCurrentPage(1);
   }, []);
+
+  // Strategy options for dropdown
+  const strategyOptions = useMemo(() => [
+    { value: 'none', label: 'No Sequence' },
+    ...strategies.map(s => ({ value: s.id, label: s.name }))
+  ], [strategies]);
 
   // Reset page when search term changes
   useEffect(() => {
@@ -128,24 +173,33 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
     onUpdateLead({ ...lead, strategyId, currentStepIndex: 0, status: 'in_progress', nextTaskDate: new Date().toISOString() });
   };
 
-  const statusOptions: { value: LeadStatus | 'all'; label: string }[] = [
-    { value: 'all', label: 'All Statuses' },
-    { value: 'not_contacted', label: 'New Leads' },
-    { value: 'in_progress', label: 'In Progress' },
-    { value: 'replied', label: 'Responded' },
-    { value: 'qualified', label: 'Qualified' },
-    { value: 'disqualified', label: 'Not a Fit' },
-  ];
 
   return (
-    <div className="flex flex-col h-full space-y-8 animate-in fade-in duration-500">
-      <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-8">
+    <div className="flex flex-col h-full space-y-6 animate-in fade-in duration-500">
+      <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-6">
         <div>
           <h2 className="text-4xl font-black text-slate-900 tracking-tight flex items-center gap-4">
             <div className="bg-emerald-500 p-2.5 rounded-2xl shadow-lg shadow-emerald-100 text-white"><Users size={28} /></div>
             Pipeline
           </h2>
-          <p className="text-slate-500 font-medium mt-1">Managing {totalCount} accounts across multiple channels.</p>
+          <p className="text-slate-500 font-medium mt-1 flex items-center gap-3">
+            Showing {totalCount.toLocaleString()} leads
+            {activeFilterCount > 0 && (
+              <>
+                <span className="text-slate-300">•</span>
+                <span className="inline-flex items-center gap-1.5 text-indigo-600">
+                  <Filter size={14} />
+                  {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active
+                </span>
+                <button
+                  onClick={clearAllFilters}
+                  className="text-rose-500 hover:text-rose-600 font-semibold flex items-center gap-1"
+                >
+                  <X size={14} /> Clear
+                </button>
+              </>
+            )}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
           <div className="relative group min-w-[320px]">
@@ -175,63 +229,146 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
         </div>
       </header>
 
-      {/* Optimized Dropdown Filter Bar */}
-      <div className="bg-white border border-slate-200 rounded-[2.5rem] p-4 shadow-sm flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-2xl text-slate-400">
-          <Filter size={18} />
-          <span className="text-[10px] font-black uppercase tracking-widest">Filters</span>
-        </div>
-
-        <FilterDropdown
-          value={statusFilter}
-          onChange={(v) => handleFilterChange(setStatusFilter, v as LeadStatus | 'all')}
-          options={statusOptions}
-          label="Status"
-        />
-
-        <FilterDropdown
-          value={strategyFilter}
-          onChange={(v) => handleFilterChange(setStrategyFilter, v)}
-          options={[{ value: 'all', label: 'All Sequences' }, ...strategies.map(s => ({ value: s.id, label: s.name }))]}
-          label="Sequence"
-        />
-
-        <FilterDropdown
-          value={channelFilter}
-          onChange={(v) => handleFilterChange(setChannelFilter, v as ChannelFilter)}
-          options={[
-            { value: 'any', label: 'All Channels' },
-            { value: 'all_socials', label: 'Full Social Presence' },
-            { value: 'ig_only', label: 'Instagram Only' },
-            { value: 'no_socials', label: 'No Social Footprint' },
-            { value: 'has_email', label: 'Has Email' },
-            { value: 'has_phone', label: 'Has Phone' },
-          ]}
-          label="Visibility"
-        />
-
-        {(statusFilter !== 'all' || strategyFilter !== 'all' || channelFilter !== 'any') && (
-          <button
-            onClick={() => { handleFilterChange(setStatusFilter, 'all'); setStrategyFilter('all'); setChannelFilter('any'); }}
-            className="ml-auto flex items-center gap-2 px-6 py-3 text-rose-500 font-black text-[10px] uppercase tracking-widest hover:bg-rose-50 rounded-2xl transition-all"
-          >
-            <X size={14} strokeWidth={3} /> Clear All
-          </button>
-        )}
-      </div>
-
       <div className={`bg-white border border-slate-200 rounded-[3rem] overflow-hidden shadow-sm flex-1 flex flex-col min-h-[600px] transition-opacity ${isLoading && !isPlaceholderData ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-        {/* Table Header */}
-        <div className="bg-slate-50/90 backdrop-blur-xl overflow-x-auto">
+        {/* Table Header with Excel-style column filters */}
+        <div className="bg-slate-50/90 backdrop-blur-xl overflow-x-auto border-b border-slate-100">
           <div className="grid grid-cols-[60px_minmax(180px,2fr)_minmax(140px,1.2fr)_minmax(140px,1.2fr)_100px_180px_130px_130px_50px] min-w-[1200px]">
-            <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">#</div>
-            <SortableHeader field="company_name" label="Prospect" currentSort={sortBy} direction={sortDirection} onSort={handleSort} />
-            <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</div>
-            <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Industry</div>
-            <SortableHeader field="google_rating" label="Trust" currentSort={sortBy} direction={sortDirection} onSort={handleSort} center />
-            <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Sequence</div>
-            <div className="px-4 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Channels</div>
-            <SortableHeader field="status" label="Status" currentSort={sortBy} direction={sortDirection} onSort={handleSort} />
+            <div className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">#</div>
+
+            {/* Prospect column - sortable, no filter */}
+            <div className="px-4 py-4">
+              <ColumnFilterDropdown
+                label="Prospect"
+                field="company_name"
+                sortable={true}
+                sortDirection={sortFields.includes('company_name') ? sortDirections[sortFields.indexOf('company_name')] : null}
+                sortPriority={sortFields.length > 1 && sortFields.includes('company_name') ? sortFields.indexOf('company_name') + 1 : undefined}
+                onSort={(dir) => {
+                  const idx = sortFields.indexOf('company_name');
+                  if (idx !== -1) {
+                    setSortDirections(prev => prev.map((d, i) => i === idx ? dir : d));
+                  } else {
+                    setSortFields(prev => [...prev, 'company_name']);
+                    setSortDirections(prev => [...prev, dir]);
+                  }
+                  setCurrentPage(1);
+                }}
+                filterType="none"
+              />
+            </div>
+
+            {/* Location column - not sortable, but filterable (would need dynamic options) */}
+            <div className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</div>
+
+            {/* Industry column - not sortable for now */}
+            <div className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Industry</div>
+
+            {/* Trust/Rating column - sortable with range filter */}
+            <div className="px-4 py-4 flex justify-center">
+              <ColumnFilterDropdown
+                label="Trust"
+                field="google_rating"
+                sortable={true}
+                sortDirection={sortFields.includes('google_rating') ? sortDirections[sortFields.indexOf('google_rating')] : null}
+                sortPriority={sortFields.length > 1 && sortFields.includes('google_rating') ? sortFields.indexOf('google_rating') + 1 : undefined}
+                onSort={(dir) => {
+                  const idx = sortFields.indexOf('google_rating');
+                  if (idx !== -1) {
+                    setSortDirections(prev => prev.map((d, i) => i === idx ? dir : d));
+                  } else {
+                    setSortFields(prev => [...prev, 'google_rating']);
+                    setSortDirections(prev => [...prev, dir]);
+                  }
+                  setCurrentPage(1);
+                }}
+                filterType="range"
+                rangeMin={0}
+                rangeMax={5}
+                rangeValue={ratingRange}
+                onRangeChange={(val) => { setRatingRange(val); setCurrentPage(1); }}
+              />
+            </div>
+
+            {/* Sequence column - filterable with strategies */}
+            <div className="px-4 py-4 flex justify-center">
+              <ColumnFilterDropdown
+                label="Sequence"
+                field="strategy_id"
+                sortable={false}
+                filterType="multiselect"
+                options={strategyOptions.map(s => s.label)}
+                selectedValues={strategyFilter.map(id => {
+                  const strategy = strategyOptions.find(s => s.value === id);
+                  return strategy?.label || id;
+                })}
+                onFilterChange={(labels) => {
+                  const ids = labels.map(label => {
+                    const strategy = strategyOptions.find(s => s.label === label);
+                    return strategy?.value || label;
+                  });
+                  setStrategyFilter(ids);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
+
+            {/* Channels column - filterable */}
+            <div className="px-4 py-4 flex justify-center">
+              <ColumnFilterDropdown
+                label="Channels"
+                field="channels"
+                sortable={false}
+                filterType="multiselect"
+                options={CHANNEL_OPTIONS.map(c => c.label)}
+                selectedValues={(channelFilter || []).map(ch => {
+                  const opt = CHANNEL_OPTIONS.find(c => c.value === ch);
+                  return opt?.label || ch;
+                })}
+                onFilterChange={(labels) => {
+                  const values = labels.map(label => {
+                    const opt = CHANNEL_OPTIONS.find(c => c.label === label);
+                    return opt?.value || label;
+                  }) as ChannelFilter;
+                  setChannelFilter(values);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
+
+            {/* Status column - sortable and filterable */}
+            <div className="px-4 py-4">
+              <ColumnFilterDropdown
+                label="Status"
+                field="status"
+                sortable={true}
+                sortDirection={sortFields.includes('status') ? sortDirections[sortFields.indexOf('status')] : null}
+                sortPriority={sortFields.length > 1 && sortFields.includes('status') ? sortFields.indexOf('status') + 1 : undefined}
+                onSort={(dir) => {
+                  const idx = sortFields.indexOf('status');
+                  if (idx !== -1) {
+                    setSortDirections(prev => prev.map((d, i) => i === idx ? dir : d));
+                  } else {
+                    setSortFields(prev => [...prev, 'status']);
+                    setSortDirections(prev => [...prev, dir]);
+                  }
+                  setCurrentPage(1);
+                }}
+                filterType="multiselect"
+                options={STATUS_OPTIONS.map(s => s.label)}
+                selectedValues={statusFilter.map(val => {
+                  const opt = STATUS_OPTIONS.find(s => s.value === val);
+                  return opt?.label || val;
+                })}
+                onFilterChange={(labels) => {
+                  const values = labels.map(label => {
+                    const opt = STATUS_OPTIONS.find(s => s.label === label);
+                    return opt?.value || label;
+                  });
+                  setStatusFilter(values);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
             <div className="px-4 py-5"></div>
           </div>
         </div>
@@ -419,24 +556,7 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
   );
 };
 
-const FilterDropdown = memo<{ value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; label: string }>(
-  ({ value, onChange, options, label }) => (
-    <div className="relative group flex items-center bg-slate-50 px-5 py-3 rounded-2xl border border-slate-100 hover:border-indigo-200 transition-all min-w-[180px]">
-      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-3 border-r border-slate-200 pr-3">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="appearance-none bg-transparent outline-none font-black text-[10px] uppercase tracking-widest text-slate-900 pr-8 cursor-pointer w-full"
-      >
-        {options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-      </select>
-      <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
-    </div>
-  )
-);
-
-FilterDropdown.displayName = 'FilterDropdown';
-
+// Channel indicator for the table rows
 const Indicator = memo<{ active: boolean; icon: React.ReactNode; activeClass: string }>(
   ({ active, icon, activeClass }) => (
     <div className={`w-7 h-7 rounded-lg border flex items-center justify-center transition-all ${active ? activeClass : 'bg-white border-slate-100 text-slate-200'}`}>
@@ -446,31 +566,5 @@ const Indicator = memo<{ active: boolean; icon: React.ReactNode; activeClass: st
 );
 
 Indicator.displayName = 'Indicator';
-
-const SortableHeader = memo<{
-  field: SortField;
-  label: string;
-  currentSort: SortField;
-  direction: SortDirection;
-  onSort: (field: SortField) => void;
-  center?: boolean;
-}>(({ field, label, currentSort, direction, onSort, center }) => {
-  const isActive = currentSort === field;
-  return (
-    <button
-      onClick={() => onSort(field)}
-      className={`px-4 py-5 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 transition-colors hover:text-indigo-600 ${center ? 'justify-center' : ''} ${isActive ? 'text-indigo-600' : 'text-slate-400'}`}
-    >
-      {label}
-      {isActive ? (
-        direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
-      ) : (
-        <ArrowDown size={12} className="opacity-0 group-hover:opacity-50" />
-      )}
-    </button>
-  );
-});
-
-SortableHeader.displayName = 'SortableHeader';
 
 export default LeadList;

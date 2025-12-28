@@ -675,12 +675,25 @@ export type SortField = 'created_at' | 'company_name' | 'google_rating' | 'statu
 export type SortDirection = 'asc' | 'desc';
 
 export interface LeadFilters extends PaginationParams {
-  status?: Lead['status'] | 'all';
-  strategyId?: string | 'all';
+  // Text search across multiple fields
   search?: string;
-  channelFilter?: 'all' | 'all_socials' | 'ig_only' | 'no_socials' | 'has_email' | 'has_phone';
-  sortBy?: SortField;
-  sortDirection?: SortDirection;
+
+  // Multi-select filters (array-based for Excel-style filtering)
+  status?: string[];           // Multiple statuses e.g. ['in_progress', 'replied']
+  strategyId?: string[];       // Multiple strategies (use 'none' for unassigned)
+  location?: string[];         // Multiple locations
+  niche?: string[];            // Multiple industries/niches
+
+  // Channel availability filters
+  channels?: ('has_instagram' | 'has_facebook' | 'has_linkedin' | 'has_email' | 'has_phone')[];
+
+  // Rating range filter
+  ratingMin?: number;
+  ratingMax?: number;
+
+  // Multi-column sorting
+  sortBy?: SortField[];
+  sortDirection?: SortDirection[];
 }
 
 export interface PaginatedResponse<T> {
@@ -692,6 +705,7 @@ export interface PaginatedResponse<T> {
 /**
  * Paginated leads query with server-side filtering.
  * Much more efficient than client-side filtering for large datasets.
+ * Supports Excel-style multi-select filters with array-based parameters.
  */
 export async function getLeadsPaginated(
   userId: string,
@@ -702,28 +716,93 @@ export async function getLeadsPaginated(
     offset = 0,
     status,
     strategyId,
+    location,
+    niche,
+    channels,
+    ratingMin,
+    ratingMax,
     search,
-    channelFilter,
-    sortBy = 'created_at',
-    sortDirection = 'desc'
+    sortBy = ['created_at'],
+    sortDirection = ['desc']
   } = filters;
 
   let query = supabase
     .from('leads')
     .select('*', { count: 'exact' })
-    .eq('user_id', userId)
-    .order(sortBy, { ascending: sortDirection === 'asc' })
-    .order('id', { ascending: true }) // Secondary sort for stable ordering
-    .range(offset, offset + limit - 1);
+    .eq('user_id', userId);
 
-  // Apply status filter
-  if (status && status !== 'all') {
-    query = query.eq('status', status);
+  // Apply multi-column sort
+  sortBy.forEach((field, index) => {
+    const direction = sortDirection[index] || 'desc';
+    query = query.order(field, { ascending: direction === 'asc' });
+  });
+
+  // Final stable sort by id
+  query = query.order('id', { ascending: true });
+
+  query = query.range(offset, offset + limit - 1);
+
+  // Apply status filter (multi-select)
+  if (status && status.length > 0) {
+    query = query.in('status', status);
   }
 
-  // Apply strategy filter
-  if (strategyId && strategyId !== 'all') {
-    query = query.eq('strategy_id', strategyId);
+  // Apply strategy filter (multi-select, handle 'none' for unassigned)
+  if (strategyId && strategyId.length > 0) {
+    const hasNone = strategyId.includes('none');
+    const actualIds = strategyId.filter(id => id !== 'none');
+
+    if (hasNone && actualIds.length > 0) {
+      // Include both unassigned AND specific strategies
+      query = query.or(`strategy_id.is.null,strategy_id.in.(${actualIds.join(',')})`);
+    } else if (hasNone) {
+      // Only unassigned leads
+      query = query.is('strategy_id', null);
+    } else {
+      // Only specific strategies
+      query = query.in('strategy_id', actualIds);
+    }
+  }
+
+  // Apply location filter (multi-select)
+  if (location && location.length > 0) {
+    query = query.in('location', location);
+  }
+
+  // Apply niche/industry filter (multi-select)
+  if (niche && niche.length > 0) {
+    query = query.in('niche', niche);
+  }
+
+  // Apply channel availability filters
+  if (channels && channels.length > 0) {
+    channels.forEach(channel => {
+      switch (channel) {
+        case 'has_instagram':
+          query = query.not('instagram_url', 'is', null);
+          break;
+        case 'has_facebook':
+          query = query.not('facebook_url', 'is', null);
+          break;
+        case 'has_linkedin':
+          query = query.not('linkedin_url', 'is', null);
+          break;
+        case 'has_email':
+          query = query.not('email', 'is', null);
+          break;
+        case 'has_phone':
+          query = query.not('phone', 'is', null);
+          break;
+      }
+    });
+  }
+
+  // Apply rating range filter
+  if (ratingMin !== undefined) {
+    query = query.gte('google_rating', ratingMin);
+  }
+  if (ratingMax !== undefined) {
+    query = query.lte('google_rating', ratingMax);
   }
 
   // Apply search filter (searches multiple fields)
@@ -732,36 +811,6 @@ export async function getLeadsPaginated(
     query = query.or(
       `company_name.ilike.${searchTerm},contact_name.ilike.${searchTerm},email.ilike.${searchTerm},location.ilike.${searchTerm},niche.ilike.${searchTerm}`
     );
-  }
-
-  // Apply channel filters
-  if (channelFilter && channelFilter !== 'all') {
-    switch (channelFilter) {
-      case 'all_socials':
-        query = query
-          .not('instagram_url', 'is', null)
-          .not('facebook_url', 'is', null)
-          .not('linkedin_url', 'is', null);
-        break;
-      case 'ig_only':
-        query = query
-          .not('instagram_url', 'is', null)
-          .is('facebook_url', null)
-          .is('linkedin_url', null);
-        break;
-      case 'no_socials':
-        query = query
-          .is('instagram_url', null)
-          .is('facebook_url', null)
-          .is('linkedin_url', null);
-        break;
-      case 'has_email':
-        query = query.not('email', 'is', null);
-        break;
-      case 'has_phone':
-        query = query.not('phone', 'is', null);
-        break;
-    }
   }
 
   const { data, error, count } = await query;
@@ -945,5 +994,51 @@ export async function updateUserApiKeys(
 export async function hasApiKeysConfigured(userId: string): Promise<boolean> {
   const keys = await getUserApiKeys(userId);
   return !!(keys.apifyToken && keys.anthropicKey);
+}
+
+// ============================================
+// UNIQUE VALUES FOR COLUMN FILTERS
+// For Excel-style dropdown options
+// ============================================
+
+export type FilterColumn = 'location' | 'niche' | 'status';
+
+/**
+ * Get unique values for a column to populate filter dropdowns.
+ * Results are sorted alphabetically and limited to prevent huge lists.
+ */
+export async function getUniqueColumnValues(
+  userId: string,
+  column: FilterColumn
+): Promise<string[]> {
+  const columnMap: Record<FilterColumn, string> = {
+    location: 'location',
+    niche: 'niche',
+    status: 'status',
+  };
+
+  const dbColumn = columnMap[column];
+
+  // Use a raw query with DISTINCT for efficiency
+  const { data, error } = await supabase
+    .from('leads')
+    .select(dbColumn)
+    .eq('user_id', userId)
+    .not(dbColumn, 'is', null)
+    .order(dbColumn, { ascending: true })
+    .limit(500);
+
+  if (error) throw error;
+
+  // Extract unique values (Supabase doesn't have DISTINCT, so we dedupe client-side)
+  const values = new Set<string>();
+  (data || []).forEach(row => {
+    const value = row[dbColumn as keyof typeof row];
+    if (value && typeof value === 'string' && value.trim()) {
+      values.add(value.trim());
+    }
+  });
+
+  return Array.from(values).sort((a, b) => a.localeCompare(b));
 }
 
