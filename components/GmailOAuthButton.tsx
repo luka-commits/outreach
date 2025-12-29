@@ -135,7 +135,7 @@ const GmailOAuthButton: React.FC<GmailOAuthButtonProps> = ({ onSuccess, onError 
         throw new Error('Not authenticated');
       }
 
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
       const response = await fetch(`${supabaseUrl}/functions/v1/gmail-oauth-callback`, {
         method: 'POST',
         headers: {
