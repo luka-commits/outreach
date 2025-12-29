@@ -45,6 +45,15 @@ export const queryKeys = {
   // Scrape Jobs
   scrapeJobs: (userId: string) => ['scrape-jobs', userId] as const,
   scrapeJob: (userId: string, jobId: string) => ['scrape-jobs', userId, jobId] as const,
+
+  // Call Records
+  callRecords: (userId: string | undefined) => ['callRecords', userId] as const,
+  callRecordsByLead: (userId: string | undefined, leadId: string) =>
+    ['callRecords', userId, 'byLead', leadId] as const,
+  callMetrics: (userId: string | undefined) => ['callMetrics', userId] as const,
+
+  // Twilio Credentials
+  twilioCredentials: (userId: string | undefined) => ['twilioCredentials', userId] as const,
 } as const;
 
 // Helper for invalidating related queries

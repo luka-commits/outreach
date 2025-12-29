@@ -5,3 +5,19 @@ export { useStrategiesQuery, useStrategyMutations, useStrategies } from './useSt
 export { useGoalsQuery, useGoalsMutations, useGoals } from './useGoalsQuery';
 export { useLeadsInfinite, useLeadsInfiniteFlat, usePrefetchLeads } from './useLeadsInfinite';
 export { useScrapeJobsQuery, useCreateScrapeJobMutation, useScrapeJobsRealtime, useScrapeJobs } from './useScrapeJobsQuery';
+
+// Call Records
+export {
+  useCallRecordsByLead,
+  useCallMetrics,
+  useCreateCallRecord,
+  useUpdateCallRecord,
+} from './useCallRecordsQuery';
+
+// Twilio Credentials
+export {
+  useTwilioCredentials,
+  useUpdateTwilioCredentials,
+  useClearTwilioCredentials,
+  useHasTwilioConfigured,
+} from './useTwilioCredentialsQuery';

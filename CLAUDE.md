@@ -18,6 +18,7 @@ OutreachPilot is a sales outreach management SPA for tracking leads, scheduling 
 - Schedule and process daily tasks based on strategy timelines
 - Monitor outreach goals and progress with visual analytics
 - Personalize messages using AI (Google Gemini)
+- **Make cold calls directly from the browser** using Twilio WebRTC integration
 
 ---
 
@@ -32,6 +33,7 @@ OutreachPilot is a sales outreach management SPA for tracking leads, scheduling 
 | @tanstack/react-query 5.x | Server state management |
 | @tanstack/react-virtual 3.x | Virtual scrolling (available) |
 | Google Gemini AI | Message personalization |
+| Twilio Voice SDK | Browser-based cold calling (WebRTC) |
 | Tailwind CSS | Styling |
 | Lucide React | Icons |
 
@@ -77,9 +79,12 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 │   │   ├── useStrategiesQuery.ts# Outreach strategies
 │   │   ├── useGoalsQuery.ts     # Daily outreach goals
 │   │   ├── useLeadCountQuery.ts # Lead count for subscription limits
-│   │   └── useScrapeJobsQuery.ts# Scrape job management & progress
+│   │   ├── useScrapeJobsQuery.ts# Scrape job management & progress
+│   │   ├── useCallRecordsQuery.ts # Call history and metrics
+│   │   └── useTwilioCredentialsQuery.ts # Twilio credentials management
 │   ├── useAuth.tsx              # Authentication context & provider
-│   └── useSubscription.ts       # Subscription tier & limits
+│   ├── useSubscription.ts       # Subscription tier & limits
+│   └── useTwilioDevice.ts       # Twilio WebRTC device management for calling
 ├── components/
 │   ├── layout/                  # Layout wrapper components
 │   ├── Dashboard.tsx            # Overview & analytics with goal rings
@@ -99,7 +104,9 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 │   ├── ScrapeProgressTimeline.tsx # Scrape job progress visualization
 │   ├── LeadAddForm.tsx          # Manual lead creation form
 │   ├── Reporting.tsx            # Analytics & metrics
-│   ├── SettingsView.tsx         # User settings & API keys
+│   ├── SettingsView.tsx         # User settings, API keys & Twilio config
+│   ├── TwilioSetupWizard.tsx    # Guided Twilio account setup (5 steps)
+│   ├── CallProcessingPanel.tsx  # In-browser calling UI for TaskQueue
 │   ├── ViewRouter.tsx           # View routing logic
 │   ├── LandingPage.tsx          # Marketing/login page
 │   ├── PricingPage.tsx          # Subscription pricing display
@@ -121,8 +128,13 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 │   ├── start-scrape/            # Initiates lead scraping jobs
 │   ├── scrape-callback/         # Webhook for scrape results
 │   ├── cancel-job/              # Cancels in-progress scrape jobs
-│   └── import-leads/            # Edge function for CSV processing
-└── migrations/                  # SQL migrations (7 migration files)
+│   ├── import-leads/            # Edge function for CSV processing
+│   ├── verify-twilio/           # Validates Twilio credentials in setup wizard
+│   ├── twilio-token/            # WebRTC access token generation
+│   ├── twilio-voice/            # TwiML handler for outbound calls
+│   ├── call-status/             # Call status webhook from Twilio
+│   └── recording-ready/         # Recording completion webhook with transcription
+└── migrations/                  # SQL migrations (8 migration files)
 ```
 
 ---
@@ -210,6 +222,31 @@ subscription_status   text DEFAULT 'free'
 subscription_plan     text DEFAULT 'basic'
 current_period_end    timestamp
 stripe_customer_id    text
+-- Twilio credentials (added for cold calling)
+twilio_account_sid    text
+twilio_auth_token     text
+twilio_twiml_app_sid  text
+twilio_phone_number   text
+```
+
+### call_records
+```sql
+id                uuid PRIMARY KEY
+user_id           uuid REFERENCES auth.users
+lead_id           uuid REFERENCES leads
+twilio_call_sid   text
+from_number       text NOT NULL
+to_number         text NOT NULL
+outcome           text  -- connected, voicemail, no_answer, busy, wrong_number
+status            text DEFAULT 'initiated'  -- initiated, ringing, in-progress, completed, failed
+duration_seconds  integer
+recording_url     text
+recording_saved   boolean DEFAULT false
+transcription     text
+ai_summary        text
+notes             text
+started_at        timestamp DEFAULT now()
+ended_at          timestamp
 ```
 
 ### scrape_jobs
@@ -253,6 +290,9 @@ queryKeys.activities(userId)               // ['activities', userId]
 queryKeys.activitiesByLead(userId, leadId) // ['activities', userId, 'byLead', leadId]
 queryKeys.strategies(userId)               // ['strategies', userId]
 queryKeys.goals(userId)                    // ['goals', userId]
+queryKeys.callRecords(userId)              // ['callRecords', userId]
+queryKeys.callRecordsByLead(userId, leadId)// ['callRecords', userId, 'byLead', leadId]
+queryKeys.twilioCredentials(userId)        // ['twilioCredentials', userId]
 ```
 
 ---
@@ -437,6 +477,13 @@ Checked via `useSubscription()` hook which reads `profiles.subscription_status`.
 | `getScrapeJobs()` | User's scrape job history |
 | `getScrapeJobById()` | Single scrape job with progress |
 | `createScrapeJob()` / `cancelScrapeJob()` | Scrape job management |
+| `getTwilioCredentials()` | User's Twilio credentials |
+| `updateTwilioCredentials()` | Save Twilio credentials |
+| `hasTwilioConfigured()` | Check if Twilio is set up |
+| `createCallRecord()` | Create new call record |
+| `updateCallRecord()` | Update call status/outcome |
+| `getCallsByLead()` | Call history for a lead |
+| `getCallMetrics()` | Call analytics (connect rate, etc.) |
 
 ---
 
@@ -506,6 +553,7 @@ Run migrations in order:
 5. `20251229_fix_enhance_scrape_jobs.sql` - Scrape job enhancements
 6. `20251230_add_enrichment_fields_to_leads.sql` - Lead enrichment
 7. `20251231_add_scrape_job_progress.sql` - Progress tracking
+8. `20251229_add_calling_support.sql` - Call records table & Twilio credentials
 
 ### Edge Function Configuration
 

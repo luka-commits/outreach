@@ -2,12 +2,14 @@ import React, { useState, useEffect, useMemo, memo } from 'react';
 import {
   ArrowLeft, Check, Copy, ExternalLink, Instagram, Mail, Phone,
   Facebook, Sparkles, Loader2, Linkedin, LayoutGrid, List, ChevronRight,
-  PlayCircle, Clock, Calendar as CalendarIcon, ChevronLeft, MapPin, AlertCircle, RefreshCw, CheckSquare, Trash2
+  PlayCircle, Clock, Calendar as CalendarIcon, ChevronLeft, MapPin, AlertCircle, RefreshCw, CheckSquare, Trash2,
+  MessageSquare, PhoneCall, Filter
 } from 'lucide-react';
-import { Lead, Strategy, Activity } from '../types';
+import { Lead, Strategy, Activity, CallOutcome } from '../types';
 import { ACTION_ICONS } from '../constants';
 import { generatePersonalizedMessage } from '../services/geminiService';
 import { getPlatformColor } from '../utils/styles';
+import CallProcessingPanel from './CallProcessingPanel';
 
 interface TaskQueueProps {
   todayTasks: Lead[];
@@ -22,6 +24,7 @@ interface TaskQueueProps {
 type ViewMode = 'list' | 'calendar' | 'processing';
 type FilterType = 'overdue' | 'today' | 'upcoming';
 type CalendarMode = 'week' | 'month';
+type TaskTypeFilter = 'all' | 'dm' | 'call' | 'email';
 
 import ConfirmModal from './ConfirmModal';
 import { useToast } from './Toast';
@@ -30,6 +33,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [activeFilter, setActiveFilter] = useState<FilterType>('today');
   const [calendarMode, setCalendarMode] = useState<CalendarMode>('week');
+  const [taskTypeFilter, setTaskTypeFilter] = useState<TaskTypeFilter>('all');
   const [isSessionMode, setIsSessionMode] = useState(false);
   const { showToast } = useToast();
 
@@ -47,14 +51,38 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
   // Calendar State
   const [currentDate, setCurrentDate] = useState(new Date()); // Used for both Month and Week view anchor
 
+  // Helper to get task action type
+  const getTaskAction = (task: Lead): string | undefined => {
+    const taskStrategy = strategies.find(s => s.id === task.strategyId);
+    return taskStrategy?.steps[task.currentStepIndex]?.action;
+  };
+
+  // Helper to check if task matches type filter
+  const matchesTaskTypeFilter = (task: Lead, filter: TaskTypeFilter): boolean => {
+    if (filter === 'all') return true;
+    const action = getTaskAction(task);
+    if (!action) return filter === 'all'; // Manual tasks show in 'all' only
+
+    if (filter === 'dm') return ['send_dm', 'fb_message', 'linkedin_dm'].includes(action);
+    if (filter === 'call') return action === 'call';
+    if (filter === 'email') return action === 'send_email';
+    return true;
+  };
+
   // Filter Logic & Counts
-  const { filteredTasks, sessionTasks, counts } = useMemo(() => {
+  const { filteredTasks, sessionTasks, counts, taskTypeCounts } = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     let overdueCount = 0;
     let todayCount = 0;
     let upcomingCount = 0;
+
+    // Task type counts (for currently active date filter)
+    let allCount = 0;
+    let dmCount = 0;
+    let callCount = 0;
+    let emailCount = 0;
 
     const sortedTasks = [...allScheduledTasks].sort((a, b) => new Date(a.nextTaskDate!).getTime() - new Date(b.nextTaskDate!).getTime());
 
@@ -80,7 +108,8 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
       return taskDate <= today && task.status !== 'replied' && task.status !== 'closed_won' && task.status !== 'closed_lost';
     });
 
-    const filtered = sortedTasks.filter(task => {
+    // First filter by date
+    const dateFiltered = sortedTasks.filter(task => {
       if (!task.nextTaskDate) return false;
       const taskDate = new Date(task.nextTaskDate);
       taskDate.setHours(0, 0, 0, 0);
@@ -97,12 +126,24 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
       return false;
     });
 
+    // Count task types within the date filter
+    dateFiltered.forEach(task => {
+      allCount++;
+      if (matchesTaskTypeFilter(task, 'dm')) dmCount++;
+      if (matchesTaskTypeFilter(task, 'call')) callCount++;
+      if (matchesTaskTypeFilter(task, 'email')) emailCount++;
+    });
+
+    // Then filter by task type
+    const filtered = dateFiltered.filter(task => matchesTaskTypeFilter(task, taskTypeFilter));
+
     return {
       filteredTasks: filtered,
       sessionTasks: sessionTasksList,
-      counts: { overdue: overdueCount, today: todayCount, upcoming: upcomingCount }
+      counts: { overdue: overdueCount, today: todayCount, upcoming: upcomingCount },
+      taskTypeCounts: { all: allCount, dm: dmCount, call: callCount, email: emailCount }
     };
-  }, [allScheduledTasks, activeFilter]);
+  }, [allScheduledTasks, activeFilter, taskTypeFilter, strategies]);
 
   // Determine current lead for processing
   const currentLead = processLeadId ? allScheduledTasks.find(l => l.id === processLeadId) : null;
@@ -286,6 +327,116 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
   };
 
 
+  // ConfirmModal must be rendered before any early returns
+  const deleteModal = (
+    <ConfirmModal
+      isOpen={deleteConfirmOpen}
+      onClose={() => setDeleteConfirmOpen(false)}
+      onConfirm={handleDeleteTask}
+      title="Remove Task?"
+      message="This will remove this task from your queue. The lead will remain in your pipeline but won't satisfy the strategy step until scheduled again."
+      confirmLabel="Remove Task"
+      variant="warning"
+    />
+  );
+
+  // Handler for call outcome from CallProcessingPanel
+  const handleCallOutcome = (outcome: CallOutcome, notes: string, durationSeconds: number) => {
+    if (!currentLead) return;
+
+    const platform: Activity['platform'] = 'call';
+    const isFirstOutreach = currentLead.currentStepIndex === 0;
+
+    // Determine next action based on outcome
+    if (outcome === 'connected') {
+      // Connected - advance to next step
+      if (strategy && step) {
+        const nextStepIndex = currentLead.currentStepIndex + 1;
+        const isLastStep = nextStepIndex >= strategy.steps.length;
+
+        let nextTaskDate: string | undefined = undefined;
+        if (!isLastStep) {
+          const nextStep = strategy.steps[nextStepIndex];
+          const today = new Date();
+          today.setDate(today.getDate() + (nextStep.dayOffset - step.dayOffset));
+          nextTaskDate = today.toISOString();
+        }
+
+        const updatedLead: Lead = {
+          ...currentLead,
+          currentStepIndex: nextStepIndex,
+          nextTaskDate: nextTaskDate,
+          status: isLastStep ? 'replied' : 'in_progress'
+        };
+
+        onUpdateLead(updatedLead);
+        onAddActivity(currentLead.id, `Call connected (${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s)`, notes, isFirstOutreach, platform);
+      } else {
+        // Manual task - just clear it
+        const updatedLead: Lead = { ...currentLead, nextTaskDate: undefined, status: 'in_progress' };
+        onUpdateLead(updatedLead);
+        onAddActivity(currentLead.id, `Call completed`, notes, false, platform);
+      }
+    } else if (outcome === 'voicemail' || outcome === 'no_answer' || outcome === 'busy') {
+      // Reschedule for tomorrow (same step)
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const updatedLead: Lead = {
+        ...currentLead,
+        nextTaskDate: tomorrow.toISOString(),
+        status: 'in_progress'
+      };
+
+      onUpdateLead(updatedLead);
+      onAddActivity(currentLead.id, `Call: ${outcome.replace('_', ' ')}`, notes, false, platform);
+    } else if (outcome === 'wrong_number') {
+      // Clear phone and remove from queue
+      const updatedLead: Lead = {
+        ...currentLead,
+        phone: undefined,
+        nextTaskDate: undefined,
+        status: 'in_progress'
+      };
+
+      onUpdateLead(updatedLead);
+      onAddActivity(currentLead.id, `Wrong number - phone cleared`, notes, false, platform);
+    }
+
+    // Auto-advance in session mode
+    if (isSessionMode) {
+      const currentIndex = sessionTasks.findIndex(t => t.id === currentLead.id);
+      const nextTask = sessionTasks[currentIndex + 1];
+      if (nextTask) {
+        setProcessLeadId(nextTask.id);
+      } else {
+        alert("All tasks in this session are complete!");
+        setIsSessionMode(false);
+        setProcessLeadId(null);
+        setViewMode('list');
+      }
+    } else {
+      setProcessLeadId(null);
+      setViewMode('list');
+    }
+  };
+
+  // Handler for skipping call task
+  const handleCallSkip = () => {
+    if (isSessionMode) {
+      const currentIndex = sessionTasks.findIndex(t => t.id === currentLead?.id);
+      const nextTask = sessionTasks[currentIndex + 1];
+      if (nextTask) {
+        setProcessLeadId(nextTask.id);
+      } else {
+        setIsSessionMode(false);
+        setViewMode('list');
+      }
+    } else {
+      setViewMode('list');
+    }
+  };
+
   if (viewMode === 'processing' && currentLead) {
     // Fallback for manual tasks or missing strategy
     const hasStrategy = !!strategy && !!step;
@@ -294,10 +445,52 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
     const displayStrategyName = strategy?.name || 'Manual';
     const stepLabel = hasStrategy ? `Step ${currentLead.currentStepIndex + 1}` : 'Manual';
 
-    // Fallback template message
+    // Check if this is a call task
+    const isCallTask = hasStrategy && step!.action === 'call';
+
+    // If it's a call task, render CallProcessingPanel
+    if (isCallTask) {
+      return (
+        <>
+          {deleteModal}
+          <div className="max-w-xl mx-auto space-y-6 animate-in slide-in-from-right-4 duration-300">
+            <div className="flex items-center justify-between">
+              <button onClick={() => { setViewMode('list'); setIsSessionMode(false); }} className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors font-bold text-xs uppercase tracking-widest">
+                <List size={18} /> {isSessionMode ? 'End Session' : 'Back to List'}
+              </button>
+              <div className="bg-white border border-slate-200 px-4 py-1.5 rounded-full text-xs font-bold text-slate-500 shadow-sm">
+                {isSessionMode ? (
+                  <span className="text-indigo-600">Session: {sessionTasks.findIndex(t => t.id === currentLead.id) + 1} / {sessionTasks.length}</span>
+                ) : (
+                  stepLabel
+                )}
+              </div>
+              <div className="w-6" />
+            </div>
+
+            <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-xl animate-in slide-in-from-bottom-8 duration-500">
+              <div className="mb-4 text-center">
+                <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase">{displayStrategyName}</span>
+              </div>
+              <CallProcessingPanel
+                lead={currentLead}
+                script={step?.script}
+                template={step?.template}
+                onOutcome={handleCallOutcome}
+                onSkip={handleCallSkip}
+              />
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    // Fallback template message for non-call tasks
     const displayMessage = message || currentLead.nextTaskNote || '';
 
     return (
+      <>
+      {deleteModal}
       <div className="max-w-xl mx-auto space-y-6 animate-in slide-in-from-right-4 duration-300">
         <div className="flex items-center justify-between">
           <button onClick={() => { setViewMode('list'); setIsSessionMode(false); }} className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors font-bold text-xs uppercase tracking-widest">
@@ -355,7 +548,6 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
                 {step!.action === 'linkedin_dm' && <ActionButton icon={<Linkedin />} label="Open LinkedIn" href={currentLead.linkedinUrl} color="bg-[#0A66C2] text-white" />}
                 {step!.action === 'send_email' && <ActionButton icon={<Mail />} label="Open Email" href={currentLead.email ? `mailto:${currentLead.email}?subject=Inquiry&body=${encodeURIComponent(displayMessage)}` : undefined} color="bg-[#EA4335] text-white" />}
                 {step!.action === 'fb_message' && <ActionButton icon={<Facebook />} label="Open Facebook" href={currentLead.facebookUrl} color="bg-[#1877F2] text-white" />}
-                {step!.action === 'call' && <ActionButton icon={<Phone />} label="Call Now" href={currentLead.phone ? `tel:${currentLead.phone}` : undefined} color="bg-[#25D366] text-white" />}
               </>
             ) : (
               <div className="p-4 bg-slate-50 rounded-2xl text-center text-slate-500 text-sm font-medium">
@@ -381,12 +573,15 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
           </div>
         </div>
       </div>
+      </>
     );
   }
 
   // --- LIST FILTER VIEW ---
   if (viewMode === 'list') {
     return (
+      <>
+      {deleteModal}
       <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
           <div>
@@ -429,6 +624,33 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
             </button>
           </div>
         </header>
+
+        {/* Task Type Filter */}
+        <div className="flex items-center gap-2 bg-white border border-slate-200 p-2 rounded-2xl shadow-sm">
+          <Filter size={16} className="text-slate-400 ml-2" />
+          {([
+            { key: 'all', label: 'All Tasks', icon: <CheckSquare size={14} /> },
+            { key: 'dm', label: 'DMs', icon: <MessageSquare size={14} /> },
+            { key: 'call', label: 'Calls', icon: <PhoneCall size={14} /> },
+            { key: 'email', label: 'Emails', icon: <Mail size={14} /> },
+          ] as const).map(({ key, label, icon }) => (
+            <button
+              key={key}
+              onClick={() => setTaskTypeFilter(key)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                taskTypeFilter === key
+                  ? 'bg-indigo-100 text-indigo-700'
+                  : 'text-slate-500 hover:bg-slate-50'
+              }`}
+            >
+              {icon}
+              {label}
+              <span className={`ml-1 ${taskTypeFilter === key ? 'text-indigo-500' : 'text-slate-400'}`}>
+                ({taskTypeCounts[key]})
+              </span>
+            </button>
+          ))}
+        </div>
 
         <div className="bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-xl shadow-slate-100">
           {filteredTasks.length > 0 ? (
@@ -502,6 +724,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
           )}
         </div>
       </div>
+      </>
     );
   }
 
@@ -529,6 +752,8 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
     }
 
     return (
+      <>
+      {deleteModal}
       <div className="space-y-8 animate-in fade-in duration-500 max-w-7xl mx-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
           <div className="space-y-2">
@@ -622,22 +847,12 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
           </div>
         </div>
       </div>
+      </>
     );
   }
 
-  return (
-    <>
-      <ConfirmModal
-        isOpen={deleteConfirmOpen}
-        onClose={() => setDeleteConfirmOpen(false)}
-        onConfirm={handleDeleteTask}
-        title="Remove Task?"
-        message="This will remove this task from your queue. The lead will remain in your pipeline but won't satisfy the strategy step until scheduled again."
-        confirmLabel="Remove Task"
-        variant="warning"
-      />
-    </>
-  );
+  // Fallback - should never reach here
+  return null;
 };
 
 const ActionButton: React.FC<{ icon: React.ReactNode, label: string, href?: string, color: string }> = ({ icon, label, href, color }) => {

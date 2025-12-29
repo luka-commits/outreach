@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, ScrapeJob } from '../types';
+import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, ScrapeJob, CallRecord, TwilioCredentials, CallMetrics } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1057,5 +1057,291 @@ export async function getUniqueColumnValues(
   });
 
   return Array.from(values).sort((a, b) => a.localeCompare(b));
+}
+
+// ============================================
+// TWILIO CREDENTIALS
+// For cold calling integration
+// ============================================
+
+interface DbTwilioCredentials {
+  twilio_account_sid: string | null;
+  twilio_auth_token: string | null;
+  twilio_twiml_app_sid: string | null;
+  twilio_phone_number: string | null;
+}
+
+/**
+ * Get user's Twilio credentials for calling.
+ */
+export async function getTwilioCredentials(userId: string): Promise<TwilioCredentials | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('twilio_account_sid, twilio_auth_token, twilio_twiml_app_sid, twilio_phone_number')
+    .eq('id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error;
+  if (!data) return null;
+
+  const creds = data as DbTwilioCredentials;
+
+  // Only return if all credentials are present
+  if (!creds.twilio_account_sid || !creds.twilio_auth_token || !creds.twilio_twiml_app_sid || !creds.twilio_phone_number) {
+    return null;
+  }
+
+  return {
+    accountSid: creds.twilio_account_sid,
+    authToken: creds.twilio_auth_token,
+    twimlAppSid: creds.twilio_twiml_app_sid,
+    phoneNumber: creds.twilio_phone_number,
+  };
+}
+
+/**
+ * Update user's Twilio credentials.
+ */
+export async function updateTwilioCredentials(
+  userId: string,
+  creds: TwilioCredentials
+): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      twilio_account_sid: creds.accountSid,
+      twilio_auth_token: creds.authToken,
+      twilio_twiml_app_sid: creds.twimlAppSid,
+      twilio_phone_number: creds.phoneNumber,
+    })
+    .eq('id', userId);
+
+  if (error) throw error;
+}
+
+/**
+ * Check if user has Twilio configured for calling.
+ */
+export async function hasTwilioConfigured(userId: string): Promise<boolean> {
+  const creds = await getTwilioCredentials(userId);
+  return creds !== null;
+}
+
+/**
+ * Clear user's Twilio credentials.
+ */
+export async function clearTwilioCredentials(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      twilio_account_sid: null,
+      twilio_auth_token: null,
+      twilio_twiml_app_sid: null,
+      twilio_phone_number: null,
+    })
+    .eq('id', userId);
+
+  if (error) throw error;
+}
+
+// ============================================
+// CALL RECORDS
+// For tracking call history and metrics
+// ============================================
+
+interface DbCallRecord {
+  id: string;
+  user_id: string;
+  lead_id: string;
+  twilio_call_sid: string | null;
+  from_number: string;
+  to_number: string;
+  outcome: string | null;
+  status: string;
+  duration_seconds: number | null;
+  recording_url: string | null;
+  recording_saved: boolean;
+  transcription: string | null;
+  ai_summary: string | null;
+  notes: string | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
+const dbCallRecordToCallRecord = (db: DbCallRecord): CallRecord => ({
+  id: db.id,
+  userId: db.user_id,
+  leadId: db.lead_id,
+  twilioCallSid: db.twilio_call_sid || undefined,
+  fromNumber: db.from_number,
+  toNumber: db.to_number,
+  outcome: db.outcome as CallRecord['outcome'],
+  status: db.status as CallRecord['status'],
+  durationSeconds: db.duration_seconds || undefined,
+  recordingUrl: db.recording_url || undefined,
+  recordingSaved: db.recording_saved,
+  transcription: db.transcription || undefined,
+  aiSummary: db.ai_summary || undefined,
+  notes: db.notes || undefined,
+  startedAt: db.started_at,
+  endedAt: db.ended_at || undefined,
+});
+
+/**
+ * Create a new call record when initiating a call.
+ */
+export async function createCallRecord(
+  userId: string,
+  leadId: string,
+  fromNumber: string,
+  toNumber: string
+): Promise<CallRecord> {
+  const { data, error } = await supabase
+    .from('call_records')
+    .insert({
+      user_id: userId,
+      lead_id: leadId,
+      from_number: fromNumber,
+      to_number: toNumber,
+      status: 'initiated',
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return dbCallRecordToCallRecord(data);
+}
+
+/**
+ * Update a call record with status, outcome, duration, etc.
+ */
+export async function updateCallRecord(
+  callId: string,
+  userId: string,
+  updates: Partial<Omit<CallRecord, 'id' | 'userId' | 'leadId'>>
+): Promise<CallRecord> {
+  const dbUpdates: Partial<DbCallRecord> = {};
+
+  if (updates.twilioCallSid !== undefined) dbUpdates.twilio_call_sid = updates.twilioCallSid || null;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+  if (updates.outcome !== undefined) dbUpdates.outcome = updates.outcome || null;
+  if (updates.durationSeconds !== undefined) dbUpdates.duration_seconds = updates.durationSeconds || null;
+  if (updates.recordingUrl !== undefined) dbUpdates.recording_url = updates.recordingUrl || null;
+  if (updates.recordingSaved !== undefined) dbUpdates.recording_saved = updates.recordingSaved;
+  if (updates.transcription !== undefined) dbUpdates.transcription = updates.transcription || null;
+  if (updates.aiSummary !== undefined) dbUpdates.ai_summary = updates.aiSummary || null;
+  if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
+  if (updates.endedAt !== undefined) dbUpdates.ended_at = updates.endedAt || null;
+
+  const { data, error } = await supabase
+    .from('call_records')
+    .update(dbUpdates)
+    .eq('id', callId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return dbCallRecordToCallRecord(data);
+}
+
+/**
+ * Get call records for a specific lead.
+ */
+export async function getCallsByLead(
+  userId: string,
+  leadId: string
+): Promise<CallRecord[]> {
+  const { data, error } = await supabase
+    .from('call_records')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('lead_id', leadId)
+    .order('started_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(dbCallRecordToCallRecord);
+}
+
+/**
+ * Get a single call record by ID.
+ */
+export async function getCallRecord(
+  callId: string,
+  userId: string
+): Promise<CallRecord | null> {
+  const { data, error } = await supabase
+    .from('call_records')
+    .select('*')
+    .eq('id', callId)
+    .eq('user_id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error;
+  if (!data) return null;
+
+  return dbCallRecordToCallRecord(data);
+}
+
+/**
+ * Get call metrics for reporting/analytics.
+ */
+export async function getCallMetrics(
+  userId: string,
+  dateRange?: { start: Date; end: Date }
+): Promise<CallMetrics> {
+  let query = supabase
+    .from('call_records')
+    .select('outcome, duration_seconds')
+    .eq('user_id', userId)
+    .eq('status', 'completed');
+
+  if (dateRange) {
+    query = query.gte('started_at', dateRange.start.toISOString());
+    query = query.lte('started_at', dateRange.end.toISOString());
+  }
+
+  const { data, error } = await query;
+
+  if (error) throw error;
+
+  const records = data || [];
+  const metrics: CallMetrics = {
+    totalCalls: records.length,
+    connected: 0,
+    voicemail: 0,
+    noAnswer: 0,
+    busy: 0,
+    wrongNumber: 0,
+    totalTalkTimeSeconds: 0,
+    connectRate: 0,
+  };
+
+  records.forEach(record => {
+    switch (record.outcome) {
+      case 'connected':
+        metrics.connected++;
+        metrics.totalTalkTimeSeconds += record.duration_seconds || 0;
+        break;
+      case 'voicemail':
+        metrics.voicemail++;
+        break;
+      case 'no_answer':
+        metrics.noAnswer++;
+        break;
+      case 'busy':
+        metrics.busy++;
+        break;
+      case 'wrong_number':
+        metrics.wrongNumber++;
+        break;
+    }
+  });
+
+  metrics.connectRate = metrics.totalCalls > 0
+    ? (metrics.connected / metrics.totalCalls) * 100
+    : 0;
+
+  return metrics;
 }
 

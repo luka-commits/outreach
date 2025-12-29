@@ -7,6 +7,7 @@ export interface StrategyStep {
   dayOffset: number;
   action: TaskAction;
   template: string;
+  script?: string; // Full call script/talking points for call tasks
 }
 
 export interface Strategy {
@@ -97,4 +98,45 @@ export interface ScrapeJob {
   stage?: ScrapeJobStage;
   progress?: number;
   stageMessage?: string;
+}
+
+// Cold Calling Types
+export type CallOutcome = 'connected' | 'voicemail' | 'no_answer' | 'busy' | 'wrong_number';
+export type CallStatus = 'initiated' | 'ringing' | 'in-progress' | 'completed' | 'failed' | 'reconnecting';
+
+export interface CallRecord {
+  id: string;
+  userId: string;
+  leadId: string;
+  twilioCallSid?: string;
+  fromNumber: string;
+  toNumber: string;
+  outcome?: CallOutcome;
+  status: CallStatus;
+  durationSeconds?: number;
+  recordingUrl?: string;
+  recordingSaved: boolean;
+  transcription?: string;
+  aiSummary?: string;
+  notes?: string;
+  startedAt: string;
+  endedAt?: string;
+}
+
+export interface TwilioCredentials {
+  accountSid: string;
+  authToken: string;
+  twimlAppSid: string;
+  phoneNumber: string;
+}
+
+export interface CallMetrics {
+  totalCalls: number;
+  connected: number;
+  voicemail: number;
+  noAnswer: number;
+  busy: number;
+  wrongNumber: number;
+  totalTalkTimeSeconds: number;
+  connectRate: number;
 }

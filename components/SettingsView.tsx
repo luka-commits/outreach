@@ -1,9 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, CreditCard, LogOut, Shield, Key, Eye, EyeOff, Check, Loader2, ExternalLink } from 'lucide-react';
+import { User, CreditCard, LogOut, Shield, Key, Eye, EyeOff, Check, Loader2, ExternalLink, Phone, CheckCircle2, Settings } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscription } from '../hooks/useSubscription';
 import { getUserApiKeys, updateUserApiKeys } from '../services/supabase';
+import { useHasTwilioConfigured, useClearTwilioCredentials } from '../hooks/queries/useTwilioCredentialsQuery';
+import TwilioSetupWizard from './TwilioSetupWizard';
 
 interface SettingsViewProps {
     onClose: () => void;
@@ -22,6 +24,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, onOpenPricing }) =
     const [apiKeysLoading, setApiKeysLoading] = useState(true);
     const [apiKeysSaving, setApiKeysSaving] = useState(false);
     const [apiKeysSaved, setApiKeysSaved] = useState(false);
+
+    // Twilio state
+    const [showTwilioWizard, setShowTwilioWizard] = useState(false);
+    const { isConfigured: twilioConfigured, isLoading: twilioLoading, credentials: twilioCredentials } = useHasTwilioConfigured();
+    const clearTwilioCredentials = useClearTwilioCredentials();
 
     // Load existing API keys
     useEffect(() => {
@@ -128,6 +135,74 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, onOpenPricing }) =
                             </button>
                         </div>
                     </div>
+                </div>
+
+                {/* Twilio Calling Card */}
+                <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200">
+                    <div className="flex items-center gap-4 mb-6">
+                        <div className="w-12 h-12 bg-green-100 rounded-2xl flex items-center justify-center text-green-600">
+                            <Phone size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-900">Cold Calling</h2>
+                            <p className="text-slate-500 text-sm">Make calls directly from your browser</p>
+                        </div>
+                    </div>
+
+                    {twilioLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                            <Loader2 className="animate-spin text-slate-400" size={24} />
+                        </div>
+                    ) : twilioConfigured && twilioCredentials ? (
+                        <div className="space-y-4">
+                            <div className="bg-green-50 border border-green-200 rounded-2xl p-6">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <CheckCircle2 className="text-green-600" size={24} />
+                                    <span className="font-bold text-green-800">Twilio Connected</span>
+                                </div>
+                                <div className="space-y-2 text-sm text-green-700">
+                                    <p><strong>Phone Number:</strong> {twilioCredentials.phoneNumber}</p>
+                                    <p><strong>Account:</strong> {twilioCredentials.accountSid.slice(0, 10)}...</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setShowTwilioWizard(true)}
+                                    className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Settings size={18} />
+                                    Reconfigure
+                                </button>
+                                <button
+                                    onClick={() => clearTwilioCredentials.mutate()}
+                                    disabled={clearTwilioCredentials.isPending}
+                                    className="px-4 py-3 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors"
+                                >
+                                    {clearTwilioCredentials.isPending ? (
+                                        <Loader2 size={18} className="animate-spin" />
+                                    ) : (
+                                        'Disconnect'
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            <div className="bg-slate-50 rounded-2xl p-6">
+                                <p className="text-sm text-slate-600 mb-4">
+                                    Connect your Twilio account to make calls directly from OutreachPilot.
+                                    Calls cost ~$0.014/min and are billed directly to your Twilio account.
+                                </p>
+                                <button
+                                    onClick={() => setShowTwilioWizard(true)}
+                                    className="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Phone size={18} />
+                                    Set Up Calling
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* API Keys Card */}
@@ -248,6 +323,14 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, onOpenPricing }) =
                     )}
                 </div>
             </div>
+
+            {/* Twilio Setup Wizard Modal */}
+            {showTwilioWizard && (
+                <TwilioSetupWizard
+                    onClose={() => setShowTwilioWizard(false)}
+                    onComplete={() => setShowTwilioWizard(false)}
+                />
+            )}
         </div>
     );
 };
