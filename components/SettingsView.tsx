@@ -1,11 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, CreditCard, LogOut, Shield, Key, Eye, EyeOff, Check, Loader2, ExternalLink, Phone, CheckCircle2, Settings } from 'lucide-react';
+import { User, CreditCard, LogOut, Shield, Key, Eye, EyeOff, Check, Loader2, ExternalLink, Phone, CheckCircle2, Settings, Mail, Building2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscription } from '../hooks/useSubscription';
 import { getUserApiKeys, updateUserApiKeys } from '../services/supabase';
 import { useHasTwilioConfigured, useClearTwilioCredentials } from '../hooks/queries/useTwilioCredentialsQuery';
+import { useHasGmailConfigured, useClearGmailCredentials, useHasResendConfigured, useUpdateResendCredentials, useClearResendCredentials } from '../hooks/queries/useEmailSettingsQuery';
 import TwilioSetupWizard from './TwilioSetupWizard';
+import GmailOAuthButton from './GmailOAuthButton';
 
 interface SettingsViewProps {
     onClose: () => void;
@@ -30,6 +32,20 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, onOpenPricing }) =
     const { isConfigured: twilioConfigured, isLoading: twilioLoading, credentials: twilioCredentials } = useHasTwilioConfigured();
     const clearTwilioCredentials = useClearTwilioCredentials();
 
+    // Email state - Gmail
+    const { isConfigured: gmailConfigured, isLoading: gmailLoading, credentials: gmailCredentials } = useHasGmailConfigured();
+    const clearGmailCredentials = useClearGmailCredentials();
+
+    // Email state - Resend
+    const { isConfigured: resendConfigured, isLoading: resendLoading, credentials: resendCredentials } = useHasResendConfigured();
+    const updateResendCredentials = useUpdateResendCredentials();
+    const clearResendCredentials = useClearResendCredentials();
+    const [resendApiKey, setResendApiKey] = useState('');
+    const [resendFromAddress, setResendFromAddress] = useState('');
+    const [showResendApiKey, setShowResendApiKey] = useState(false);
+    const [resendSaving, setResendSaving] = useState(false);
+    const [resendSaved, setResendSaved] = useState(false);
+
     // Load existing API keys
     useEffect(() => {
         if (user?.id) {
@@ -42,6 +58,14 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, onOpenPricing }) =
                 .finally(() => setApiKeysLoading(false));
         }
     }, [user?.id]);
+
+    // Load existing Resend credentials
+    useEffect(() => {
+        if (resendCredentials) {
+            setResendApiKey(resendCredentials.apiKey);
+            setResendFromAddress(resendCredentials.fromAddress);
+        }
+    }, [resendCredentials]);
 
     const handleSaveApiKeys = async () => {
         if (!user?.id) return;
@@ -66,6 +90,28 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, onOpenPricing }) =
         // Stripe Customer Portal
         const STRIPE_PORTAL_LINK = "https://billing.stripe.com/p/login/cNi8wP59W3790FT1iidwc00";
         window.open(STRIPE_PORTAL_LINK, '_blank');
+    };
+
+    const handleSaveResendCredentials = async () => {
+        if (!resendApiKey || !resendFromAddress) {
+            alert('Please fill in both API Key and From Address.');
+            return;
+        }
+
+        setResendSaving(true);
+        try {
+            await updateResendCredentials.mutateAsync({
+                apiKey: resendApiKey,
+                fromAddress: resendFromAddress,
+            });
+            setResendSaved(true);
+            setTimeout(() => setResendSaved(false), 2000);
+        } catch (error) {
+            console.error('Failed to save Resend credentials:', error);
+            alert('Failed to save. Please try again.');
+        } finally {
+            setResendSaving(false);
+        }
     };
 
     return (
@@ -200,6 +246,193 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, onOpenPricing }) =
                                     <Phone size={18} />
                                     Set Up Calling
                                 </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Email - Personal Gmail Card */}
+                <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200">
+                    <div className="flex items-center gap-4 mb-6">
+                        <div className="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center text-purple-600">
+                            <Mail size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-900">Email - Personal Gmail</h2>
+                            <p className="text-slate-500 text-sm">Send from your Gmail, appears in your Sent folder</p>
+                        </div>
+                    </div>
+
+                    {gmailLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                            <Loader2 className="animate-spin text-slate-400" size={24} />
+                        </div>
+                    ) : gmailConfigured && gmailCredentials ? (
+                        <div className="space-y-4">
+                            <div className="bg-purple-50 border border-purple-200 rounded-2xl p-6">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <CheckCircle2 className="text-purple-600" size={24} />
+                                    <span className="font-bold text-purple-800">Gmail Connected</span>
+                                </div>
+                                <div className="space-y-2 text-sm text-purple-700">
+                                    <p><strong>Email:</strong> {gmailCredentials.email}</p>
+                                    <p><strong>Expires:</strong> {new Date(gmailCredentials.expiresAt).toLocaleDateString()}</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => clearGmailCredentials.mutate()}
+                                    disabled={clearGmailCredentials.isPending}
+                                    className="w-full py-3 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {clearGmailCredentials.isPending ? (
+                                        <Loader2 size={18} className="animate-spin" />
+                                    ) : (
+                                        'Disconnect Gmail'
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            <div className="bg-slate-50 rounded-2xl p-6">
+                                <p className="text-sm text-slate-600 mb-4">
+                                    Connect your Gmail account to send emails directly from OutreachPilot.
+                                    Emails will appear in your Gmail Sent folder.
+                                </p>
+                                <GmailOAuthButton
+                                    onSuccess={(email) => console.log('Gmail connected:', email)}
+                                    onError={(error) => console.error('Gmail error:', error)}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Email - Business Domain Card */}
+                <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200">
+                    <div className="flex items-center gap-4 mb-6">
+                        <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600">
+                            <Building2 size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-900">Email - Business Domain</h2>
+                            <p className="text-slate-500 text-sm">Send from your company domain via Resend</p>
+                        </div>
+                    </div>
+
+                    {resendLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                            <Loader2 className="animate-spin text-slate-400" size={24} />
+                        </div>
+                    ) : resendConfigured && resendCredentials ? (
+                        <div className="space-y-4">
+                            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-6">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <CheckCircle2 className="text-indigo-600" size={24} />
+                                    <span className="font-bold text-indigo-800">Resend Connected</span>
+                                </div>
+                                <div className="space-y-2 text-sm text-indigo-700">
+                                    <p><strong>From Address:</strong> {resendCredentials.fromAddress}</p>
+                                    <p><strong>API Key:</strong> {resendCredentials.apiKey.slice(0, 10)}...</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => clearResendCredentials.mutate()}
+                                    disabled={clearResendCredentials.isPending}
+                                    className="w-full py-3 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {clearResendCredentials.isPending ? (
+                                        <Loader2 size={18} className="animate-spin" />
+                                    ) : (
+                                        'Disconnect Resend'
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-6">
+                            {/* Resend API Key */}
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">
+                                    Resend API Key
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        type={showResendApiKey ? 'text' : 'password'}
+                                        value={resendApiKey}
+                                        onChange={(e) => setResendApiKey(e.target.value)}
+                                        placeholder="re_..."
+                                        className="w-full px-4 py-3 pr-12 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowResendApiKey(!showResendApiKey)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    >
+                                        {showResendApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                                    </button>
+                                </div>
+                                <p className="mt-2 text-xs text-slate-500 flex items-center gap-1">
+                                    Get your API key at{' '}
+                                    <a
+                                        href="https://resend.com/api-keys"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-indigo-600 hover:underline inline-flex items-center gap-0.5"
+                                    >
+                                        Resend Dashboard <ExternalLink size={10} />
+                                    </a>
+                                </p>
+                            </div>
+
+                            {/* From Address */}
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">
+                                    From Address
+                                </label>
+                                <input
+                                    type="email"
+                                    value={resendFromAddress}
+                                    onChange={(e) => setResendFromAddress(e.target.value)}
+                                    placeholder="hello@yourcompany.com"
+                                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none"
+                                />
+                                <p className="mt-2 text-xs text-slate-500">
+                                    Must be a verified domain in your Resend account
+                                </p>
+                            </div>
+
+                            {/* Save Button */}
+                            <button
+                                onClick={handleSaveResendCredentials}
+                                disabled={resendSaving || !resendApiKey || !resendFromAddress}
+                                className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                            >
+                                {resendSaving ? (
+                                    <>
+                                        <Loader2 size={18} className="animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : resendSaved ? (
+                                    <>
+                                        <Check size={18} />
+                                        Saved!
+                                    </>
+                                ) : (
+                                    'Save Resend Settings'
+                                )}
+                            </button>
+
+                            {/* Info box */}
+                            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                                <p className="text-sm text-indigo-800">
+                                    <strong>Setup Steps:</strong><br />
+                                    1. Create account at <a href="https://resend.com" target="_blank" className="underline">resend.com</a><br />
+                                    2. Add & verify your domain (DNS records)<br />
+                                    3. Create an API key and paste above
+                                </p>
                             </div>
                         </div>
                     )}

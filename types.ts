@@ -30,6 +30,7 @@ export interface Lead {
   twitterUrl?: string;
   youtubeUrl?: string;
   tiktokUrl?: string;
+  loomUrl?: string;
   address?: string;
 
   // Location Fields
@@ -139,4 +140,25 @@ export interface CallMetrics {
   wrongNumber: number;
   totalTalkTimeSeconds: number;
   connectRate: number;
+}
+
+// Email Automation Types
+export type EmailProvider = 'gmail' | 'resend' | null;
+
+export interface GmailCredentials {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: string; // ISO timestamp
+  email: string;
+}
+
+export interface ResendCredentials {
+  apiKey: string;
+  fromAddress: string;
+}
+
+export interface EmailSettings {
+  provider: EmailProvider;
+  gmail?: GmailCredentials;
+  resend?: ResendCredentials;
 }

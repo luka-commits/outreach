@@ -21,3 +21,21 @@ export {
   useClearTwilioCredentials,
   useHasTwilioConfigured,
 } from './useTwilioCredentialsQuery';
+
+// Email Automation (Gmail + Resend)
+export {
+  // Gmail
+  useGmailCredentials,
+  useUpdateGmailCredentials,
+  useClearGmailCredentials,
+  useHasGmailConfigured,
+  // Resend
+  useResendCredentials,
+  useUpdateResendCredentials,
+  useClearResendCredentials,
+  useHasResendConfigured,
+  // Email Provider
+  useEmailProvider,
+  useSetEmailProvider,
+  useHasEmailConfigured,
+} from './useEmailSettingsQuery';

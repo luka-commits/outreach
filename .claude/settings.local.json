@@ -20,7 +20,9 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(open http://localhost:3000)",
-      "Bash(npx vercel:*)"
+      "Bash(npx vercel:*)",
+      "Bash(gh api:*)",
+      "Bash(open \"https://supabase.com/dashboard/project/gdlkwpmhxjaxialgvdyc/sql/new\")"
     ]
   }
 }

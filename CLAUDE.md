@@ -19,6 +19,7 @@ OutreachPilot is a sales outreach management SPA for tracking leads, scheduling 
 - Monitor outreach goals and progress with visual analytics
 - Personalize messages using AI (Google Gemini)
 - **Make cold calls directly from the browser** using Twilio WebRTC integration
+- **Send emails directly from TaskQueue** via Gmail OAuth or Resend (business domains)
 
 ---
 
@@ -81,7 +82,8 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 │   │   ├── useLeadCountQuery.ts # Lead count for subscription limits
 │   │   ├── useScrapeJobsQuery.ts# Scrape job management & progress
 │   │   ├── useCallRecordsQuery.ts # Call history and metrics
-│   │   └── useTwilioCredentialsQuery.ts # Twilio credentials management
+│   │   ├── useTwilioCredentialsQuery.ts # Twilio credentials management
+│   │   └── useEmailSettingsQuery.ts # Gmail OAuth & Resend credentials
 │   ├── useAuth.tsx              # Authentication context & provider
 │   ├── useSubscription.ts       # Subscription tier & limits
 │   └── useTwilioDevice.ts       # Twilio WebRTC device management for calling
@@ -107,6 +109,9 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 │   ├── SettingsView.tsx         # User settings, API keys & Twilio config
 │   ├── TwilioSetupWizard.tsx    # Guided Twilio account setup (5 steps)
 │   ├── CallProcessingPanel.tsx  # In-browser calling UI for TaskQueue
+│   ├── GmailOAuthButton.tsx     # Gmail OAuth connect button with PKCE
+│   ├── GmailOAuthCallback.tsx   # OAuth callback handler for popup
+│   ├── EmailSendPanel.tsx       # Email sending UI for TaskQueue
 │   ├── ViewRouter.tsx           # View routing logic
 │   ├── LandingPage.tsx          # Marketing/login page
 │   ├── PricingPage.tsx          # Subscription pricing display
@@ -133,7 +138,9 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 │   ├── twilio-token/            # WebRTC access token generation
 │   ├── twilio-voice/            # TwiML handler for outbound calls
 │   ├── call-status/             # Call status webhook from Twilio
-│   └── recording-ready/         # Recording completion webhook with transcription
+│   ├── recording-ready/         # Recording completion webhook with transcription
+│   ├── gmail-oauth-callback/    # Gmail OAuth token exchange
+│   └── send-email/              # Unified email sending (Gmail + Resend)
 └── migrations/                  # SQL migrations (8 migration files)
 ```
 
@@ -227,6 +234,14 @@ twilio_account_sid    text
 twilio_auth_token     text
 twilio_twiml_app_sid  text
 twilio_phone_number   text
+-- Email automation credentials
+gmail_access_token    text
+gmail_refresh_token   text
+gmail_token_expires_at timestamptz
+gmail_email           text
+resend_api_key        text
+resend_from_address   text
+email_provider        text  -- 'gmail' | 'resend' | null
 ```
 
 ### call_records
@@ -293,6 +308,9 @@ queryKeys.goals(userId)                    // ['goals', userId]
 queryKeys.callRecords(userId)              // ['callRecords', userId]
 queryKeys.callRecordsByLead(userId, leadId)// ['callRecords', userId, 'byLead', leadId]
 queryKeys.twilioCredentials(userId)        // ['twilioCredentials', userId]
+queryKeys.gmailCredentials(userId)         // ['gmailCredentials', userId]
+queryKeys.resendCredentials(userId)        // ['resendCredentials', userId]
+queryKeys.emailProvider(userId)            // ['emailProvider', userId]
 ```
 
 ---
@@ -483,6 +501,15 @@ Checked via `useSubscription()` hook which reads `profiles.subscription_status`.
 | `createCallRecord()` | Create new call record |
 | `updateCallRecord()` | Update call status/outcome |
 | `getCallsByLead()` | Call history for a lead |
+| `getGmailCredentials()` | User's Gmail OAuth credentials |
+| `updateGmailCredentials()` | Save Gmail OAuth tokens |
+| `clearGmailCredentials()` | Disconnect Gmail |
+| `getResendCredentials()` | User's Resend API credentials |
+| `updateResendCredentials()` | Save Resend settings |
+| `clearResendCredentials()` | Disconnect Resend |
+| `getEmailProvider()` | Current email provider preference |
+| `setEmailProvider()` | Set email provider preference |
+| `hasEmailConfigured()` | Check if any email provider is set up |
 | `getCallMetrics()` | Call analytics (connect rate, etc.) |
 
 ---
@@ -526,6 +553,10 @@ AuthGuard component in App.tsx protects routes.
 - [x] Fixed strategy selection sync issues
 - [x] Fixed lead position jumping in Pipeline
 - [x] Portal-based dropdowns to avoid z-index issues
+- [x] Email Automation: Gmail OAuth and Resend integration
+- [x] Send emails directly from TaskQueue (one-click send)
+- [x] Gmail emails appear in user's actual Sent folder
+- [x] Resend option for business domain emails
 
 ### Completed Security Improvements (Dec 2024)
 
@@ -554,6 +585,7 @@ Run migrations in order:
 6. `20251230_add_enrichment_fields_to_leads.sql` - Lead enrichment
 7. `20251231_add_scrape_job_progress.sql` - Progress tracking
 8. `20251229_add_calling_support.sql` - Call records table & Twilio credentials
+9. `20251230_add_email_settings.sql` - Gmail OAuth & Resend credentials for email automation
 
 ### Edge Function Configuration
 

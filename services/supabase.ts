@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, ScrapeJob, CallRecord, TwilioCredentials, CallMetrics } from '../types';
+import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, ScrapeJob, CallRecord, TwilioCredentials, CallMetrics, GmailCredentials, ResendCredentials, EmailProvider } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -35,6 +35,7 @@ interface DbLead {
   twitter_url: string | null;
   youtube_url: string | null;
   tiktok_url: string | null;
+  loom_url: string | null;
   address: string | null;
   location: string | null;
   zip_code: string | null;
@@ -123,6 +124,7 @@ const dbLeadToLead = (db: DbLead): Lead => ({
   twitterUrl: db.twitter_url || undefined,
   youtubeUrl: db.youtube_url || undefined,
   tiktokUrl: db.tiktok_url || undefined,
+  loomUrl: db.loom_url || undefined,
   address: db.address || undefined,
   location: db.location || undefined,
   zipCode: db.zip_code || undefined,
@@ -156,6 +158,7 @@ const leadToDbLead = (lead: Lead, userId: string): Partial<DbLead> => ({
   twitter_url: lead.twitterUrl || null,
   youtube_url: lead.youtubeUrl || null,
   tiktok_url: lead.tiktokUrl || null,
+  loom_url: lead.loomUrl || null,
   address: lead.address || null,
   location: lead.location || null,
   zip_code: lead.zipCode || null,
@@ -1343,5 +1346,219 @@ export async function getCallMetrics(
     : 0;
 
   return metrics;
+}
+
+// ============================================
+// EMAIL AUTOMATION
+// Gmail OAuth and Resend credentials management
+// ============================================
+
+interface DbGmailCredentials {
+  gmail_access_token: string | null;
+  gmail_refresh_token: string | null;
+  gmail_token_expires_at: string | null;
+  gmail_email: string | null;
+}
+
+interface DbResendCredentials {
+  resend_api_key: string | null;
+  resend_from_address: string | null;
+}
+
+/**
+ * Get user's Gmail OAuth credentials.
+ */
+export async function getGmailCredentials(userId: string): Promise<GmailCredentials | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('gmail_access_token, gmail_refresh_token, gmail_token_expires_at, gmail_email')
+    .eq('id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error;
+  if (!data) return null;
+
+  const creds = data as DbGmailCredentials;
+
+  // Only return if all credentials are present
+  if (!creds.gmail_access_token || !creds.gmail_refresh_token || !creds.gmail_token_expires_at || !creds.gmail_email) {
+    return null;
+  }
+
+  return {
+    accessToken: creds.gmail_access_token,
+    refreshToken: creds.gmail_refresh_token,
+    expiresAt: creds.gmail_token_expires_at,
+    email: creds.gmail_email,
+  };
+}
+
+/**
+ * Update user's Gmail OAuth credentials.
+ */
+export async function updateGmailCredentials(
+  userId: string,
+  creds: GmailCredentials
+): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      gmail_access_token: creds.accessToken,
+      gmail_refresh_token: creds.refreshToken,
+      gmail_token_expires_at: creds.expiresAt,
+      gmail_email: creds.email,
+      email_provider: 'gmail', // Auto-set provider when connecting Gmail
+    })
+    .eq('id', userId);
+
+  if (error) throw error;
+}
+
+/**
+ * Clear user's Gmail OAuth credentials.
+ */
+export async function clearGmailCredentials(userId: string): Promise<void> {
+  // Get current provider to check if we need to clear it
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('email_provider')
+    .eq('id', userId)
+    .single();
+
+  const updates: Record<string, unknown> = {
+    gmail_access_token: null,
+    gmail_refresh_token: null,
+    gmail_token_expires_at: null,
+    gmail_email: null,
+  };
+
+  // If Gmail was the active provider, clear it
+  if (profile?.email_provider === 'gmail') {
+    updates.email_provider = null;
+  }
+
+  const { error } = await supabase
+    .from('profiles')
+    .update(updates)
+    .eq('id', userId);
+
+  if (error) throw error;
+}
+
+/**
+ * Get user's Resend API credentials.
+ */
+export async function getResendCredentials(userId: string): Promise<ResendCredentials | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('resend_api_key, resend_from_address')
+    .eq('id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error;
+  if (!data) return null;
+
+  const creds = data as DbResendCredentials;
+
+  // Only return if both credentials are present
+  if (!creds.resend_api_key || !creds.resend_from_address) {
+    return null;
+  }
+
+  return {
+    apiKey: creds.resend_api_key,
+    fromAddress: creds.resend_from_address,
+  };
+}
+
+/**
+ * Update user's Resend API credentials.
+ */
+export async function updateResendCredentials(
+  userId: string,
+  creds: ResendCredentials
+): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      resend_api_key: creds.apiKey,
+      resend_from_address: creds.fromAddress,
+      email_provider: 'resend', // Auto-set provider when connecting Resend
+    })
+    .eq('id', userId);
+
+  if (error) throw error;
+}
+
+/**
+ * Clear user's Resend API credentials.
+ */
+export async function clearResendCredentials(userId: string): Promise<void> {
+  // Get current provider to check if we need to clear it
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('email_provider')
+    .eq('id', userId)
+    .single();
+
+  const updates: Record<string, unknown> = {
+    resend_api_key: null,
+    resend_from_address: null,
+  };
+
+  // If Resend was the active provider, clear it
+  if (profile?.email_provider === 'resend') {
+    updates.email_provider = null;
+  }
+
+  const { error } = await supabase
+    .from('profiles')
+    .update(updates)
+    .eq('id', userId);
+
+  if (error) throw error;
+}
+
+/**
+ * Get user's current email provider preference.
+ */
+export async function getEmailProvider(userId: string): Promise<EmailProvider> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('email_provider')
+    .eq('id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error;
+  if (!data) return null;
+
+  return (data.email_provider as EmailProvider) || null;
+}
+
+/**
+ * Set user's email provider preference.
+ */
+export async function setEmailProvider(
+  userId: string,
+  provider: EmailProvider
+): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ email_provider: provider })
+    .eq('id', userId);
+
+  if (error) throw error;
+}
+
+/**
+ * Check if user has any email provider configured.
+ */
+export async function hasEmailConfigured(userId: string): Promise<boolean> {
+  const [gmail, resend] = await Promise.all([
+    getGmailCredentials(userId),
+    getResendCredentials(userId),
+  ]);
+
+  return gmail !== null || resend !== null;
 }
 

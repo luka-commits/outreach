@@ -22,6 +22,9 @@ import {
   Briefcase,
   Twitter,
   Youtube,
+  Video,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Lead, Activity } from '../../types';
 import InlineEdit from './InlineEdit';
@@ -318,6 +321,17 @@ const LeadHeader: React.FC<LeadHeaderProps> = memo(({
             </div>
           </div>
 
+          {/* Loom Video Section - For Follow-up */}
+          <div className="space-y-4">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">
+              Follow-up Video
+            </h3>
+            <LoomVideoCard
+              value={lead.loomUrl}
+              onSave={(val) => handleFieldUpdate('loomUrl', val)}
+            />
+          </div>
+
           {/* Additional Social Media (Twitter, YouTube if available) */}
           {(lead.twitterUrl || lead.youtubeUrl || lead.tiktokUrl) && (
             <div className="flex flex-wrap gap-3">
@@ -480,6 +494,126 @@ const ColorfulContactCard: React.FC<{
           </button>
         </div>
       )}
+    </div>
+  );
+};
+
+// Loom Video Card Component
+const LoomVideoCard: React.FC<{
+  value?: string;
+  onSave: (value: string) => void;
+}> = ({ value, onSave }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value || '');
+  const [copied, setCopied] = useState(false);
+
+  const handleSave = () => {
+    onSave(editValue.trim());
+    setIsEditing(false);
+  };
+
+  const handleCopy = async () => {
+    if (value) {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-3 p-4 rounded-2xl border-2 border-purple-300 bg-purple-50">
+        <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 text-white">
+          <Video size={20} />
+        </div>
+        <input
+          type="url"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSave();
+            if (e.key === 'Escape') {
+              setEditValue(value || '');
+              setIsEditing(false);
+            }
+          }}
+          onBlur={handleSave}
+          autoFocus
+          placeholder="https://www.loom.com/share/..."
+          className="flex-1 bg-white border border-purple-200 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-purple-500/20 outline-none"
+        />
+      </div>
+    );
+  }
+
+  if (value) {
+    return (
+      <div className="group flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-100 hover:border-purple-200 transition-all">
+        <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow-lg">
+          <Video size={20} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest mb-1">
+            Loom Video
+          </p>
+          <p className="text-sm font-medium text-slate-700 truncate">{value}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Copy Button */}
+          <button
+            onClick={handleCopy}
+            className={`p-3 rounded-xl transition-all ${
+              copied
+                ? 'bg-emerald-500 text-white'
+                : 'bg-white border border-purple-200 text-purple-600 hover:bg-purple-100'
+            }`}
+            title={copied ? 'Copied!' : 'Copy link'}
+          >
+            {copied ? <Check size={18} /> : <Copy size={18} />}
+          </button>
+          {/* Open in new tab */}
+          <a
+            href={value}
+            target="_blank"
+            rel="noreferrer"
+            className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 text-white hover:shadow-lg transition-all"
+            title="Open Loom"
+          >
+            <ExternalLink size={18} />
+          </a>
+          {/* Edit button */}
+          <button
+            onClick={() => {
+              setEditValue(value);
+              setIsEditing(true);
+            }}
+            className="p-3 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 opacity-0 group-hover:opacity-100 transition-all"
+            title="Edit"
+          >
+            <Link size={18} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state
+  return (
+    <div
+      onClick={() => setIsEditing(true)}
+      className="flex items-center gap-4 p-4 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 hover:border-purple-300 hover:bg-purple-50 cursor-pointer transition-all group"
+    >
+      <div className="p-3 rounded-xl bg-slate-200 text-slate-400 group-hover:bg-gradient-to-br group-hover:from-purple-500 group-hover:to-indigo-600 group-hover:text-white transition-all">
+        <Video size={20} />
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-slate-400 group-hover:text-purple-600">
+          Add Loom Video
+        </p>
+        <p className="text-xs text-slate-400">
+          Perfect for personalized follow-up responses
+        </p>
+      </div>
     </div>
   );
 };

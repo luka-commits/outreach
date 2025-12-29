@@ -54,6 +54,11 @@ export const queryKeys = {
 
   // Twilio Credentials
   twilioCredentials: (userId: string | undefined) => ['twilioCredentials', userId] as const,
+
+  // Email Automation
+  gmailCredentials: (userId: string | undefined) => ['gmailCredentials', userId] as const,
+  resendCredentials: (userId: string | undefined) => ['resendCredentials', userId] as const,
+  emailProvider: (userId: string | undefined) => ['emailProvider', userId] as const,
 } as const;
 
 // Helper for invalidating related queries

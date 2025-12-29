@@ -10,6 +10,7 @@ import { ACTION_ICONS } from '../constants';
 import { generatePersonalizedMessage } from '../services/geminiService';
 import { getPlatformColor } from '../utils/styles';
 import CallProcessingPanel from './CallProcessingPanel';
+import EmailSendPanel from './EmailSendPanel';
 
 interface TaskQueueProps {
   todayTasks: Lead[];
@@ -447,6 +448,99 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks, allScheduledTasks, st
 
     // Check if this is a call task
     const isCallTask = hasStrategy && step!.action === 'call';
+    // Check if this is an email task
+    const isEmailTask = hasStrategy && step!.action === 'send_email';
+
+    // If it's an email task, render EmailSendPanel
+    if (isEmailTask) {
+      // Get subject from template first line or use default
+      const templateLines = (step?.template || '').split('\n');
+      const emailSubject = templateLines[0]?.startsWith('Subject:')
+        ? templateLines[0].replace('Subject:', '').trim()
+        : `Following up - ${currentLead.companyName}`;
+      const emailBody = templateLines[0]?.startsWith('Subject:')
+        ? templateLines.slice(1).join('\n').trim()
+        : step?.template || '';
+
+      const displayEmailMessage = message || emailBody || currentLead.nextTaskNote || '';
+
+      return (
+        <>
+          {deleteModal}
+          <div className="max-w-xl mx-auto space-y-6 animate-in slide-in-from-right-4 duration-300">
+            <div className="flex items-center justify-between">
+              <button onClick={() => { setViewMode('list'); setIsSessionMode(false); }} className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors font-bold text-xs uppercase tracking-widest">
+                <List size={18} /> {isSessionMode ? 'End Session' : 'Back to List'}
+              </button>
+              <div className="bg-white border border-slate-200 px-4 py-1.5 rounded-full text-xs font-bold text-slate-500 shadow-sm">
+                {isSessionMode ? (
+                  <span className="text-indigo-600">Session: {sessionTasks.findIndex(t => t.id === currentLead.id) + 1} / {sessionTasks.length}</span>
+                ) : (
+                  stepLabel
+                )}
+              </div>
+              <div className="w-6" />
+            </div>
+
+            <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-xl animate-in slide-in-from-bottom-8 duration-500">
+              <div className="mb-4 text-center">
+                <span className="bg-purple-50 text-purple-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase">{displayStrategyName}</span>
+              </div>
+
+              {/* Lead info */}
+              <div className="text-center mb-6">
+                <h3 className="text-2xl font-black text-slate-900">{currentLead.companyName}</h3>
+                {currentLead.contactName && (
+                  <p className="text-slate-500 font-medium">{currentLead.contactName}</p>
+                )}
+              </div>
+
+              {/* Message preview with personalization */}
+              {displayEmailMessage && (
+                <div className="mb-6">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Message</span>
+                    <button
+                      onClick={handlePersonalize}
+                      disabled={personalizing}
+                      className="flex items-center gap-1 text-xs text-indigo-600 font-bold hover:text-indigo-700"
+                    >
+                      {personalizing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                      {personalizing ? 'Personalizing...' : 'Personalize'}
+                    </button>
+                  </div>
+                  <textarea
+                    value={displayEmailMessage}
+                    onChange={(e) => setMessage(e.target.value)}
+                    className="w-full h-32 p-4 text-sm bg-slate-50 rounded-2xl border border-slate-200 resize-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 outline-none"
+                  />
+                </div>
+              )}
+
+              <EmailSendPanel
+                lead={currentLead}
+                message={displayEmailMessage}
+                subject={emailSubject
+                  .replace('{companyName}', currentLead.companyName || '')
+                  .replace('{contactName}', currentLead.contactName || '')}
+                onSend={() => {
+                  const platform = 'email';
+                  const isFirstOutreach = currentLead.currentStepIndex === 0;
+                  onAddActivity(
+                    currentLead.id,
+                    `Task completed: send_email`,
+                    displayEmailMessage.substring(0, 200),
+                    isFirstOutreach,
+                    platform
+                  );
+                }}
+                onComplete={handleCompleteTask}
+              />
+            </div>
+          </div>
+        </>
+      );
+    }
 
     // If it's a call task, render CallProcessingPanel
     if (isCallTask) {
