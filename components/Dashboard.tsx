@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Instagram, Facebook, Linkedin, Mail, Phone, Footprints, Settings2, ClipboardList, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useQueries } from '@tanstack/react-query';
+import ConsistencyChart from './shared/ConsistencyChart';
 import { Lead, OutreachGoals, Activity } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigation } from '../contexts/NavigationContext';
@@ -384,52 +384,7 @@ const Dashboard: React.FC<DashboardProps> = ({ leads: _leads, activities: _legac
 
           {/* Activity Chart Section */}
           <div className="bg-white p-8 rounded-xl border border-gray-200/60 mt-8">
-            <h3 className="text-lg font-semibold tracking-tight text-gray-900 mb-6 px-4">Daily Consistency (Last 7 Days)</h3>
-            <div className="h-[300px] w-full">
-              {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis
-                      dataKey="name"
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 700 }}
-                      dy={10}
-                    />
-                    <YAxis
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 700 }}
-                      tickFormatter={(value) => `${value}%`}
-                    />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                      cursor={{ stroke: '#2563eb', strokeWidth: 2 }}
-                      formatter={(value) => [`${value}% Goal Achieved`, 'Performance']}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="score"
-                      stroke="#2563eb"
-                      strokeWidth={3}
-                      fillOpacity={1}
-                      fill="url(#colorScore)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-slate-400 font-bold">
-                  Loading Chart...
-                </div>
-              )}
-            </div>
+            <ConsistencyChart data={chartData} />
           </div>
         </div>
       </div>

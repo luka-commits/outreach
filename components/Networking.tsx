@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Users, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import ProfileCard from './networking/ProfileCard';
 import Leaderboard from './networking/Leaderboard';
@@ -6,7 +6,9 @@ import {
   useNetworking,
   useUserPublicProfileMutations,
   useRefreshUserActivityMetrics,
+  useGoalsQuery,
 } from '../hooks/queries';
+import { useActivitiesPaginatedQuery } from '../hooks/queries/useActivitiesQuery';
 import { LeaderboardPeriod, UserPublicProfile } from '../types';
 import { useToast } from './Toast';
 import { useAuth } from '../hooks/useAuth';
@@ -30,6 +32,64 @@ const Networking: React.FC = () => {
     refetchLeaderboard,
     refetchProfile,
   } = useNetworking(user?.id, period);
+
+  // Fetch goals for chart calculation
+  const { data: goals } = useGoalsQuery(user?.id);
+
+  // Fetch last 7 days of activities for chart
+  const chartStartDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6); // Last 7 days including today
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }, []);
+
+  const { data: chartActivities = [] } = useActivitiesPaginatedQuery(user?.id, {
+    startDate: chartStartDate,
+    limit: 5000,
+  });
+
+  // Calculate chart data (same logic as Dashboard.tsx)
+  const chartData = useMemo(() => {
+    if (!goals) return [];
+
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const isoDateParts = d.toISOString().split('T');
+      const dateKey = isoDateParts[0] ?? '';
+
+      const dayActivities = chartActivities.filter((a) =>
+        a.timestamp.startsWith(dateKey)
+      ).length;
+
+      // Calculate total daily goal sum
+      const totalDailyGoal = Object.values(goals).reduce(
+        (acc, val) => acc + (val as number),
+        0
+      );
+
+      const percentage =
+        totalDailyGoal > 0
+          ? Math.min(100, Math.round((dayActivities / totalDailyGoal) * 100))
+          : 0;
+
+      days.push({ name: dayName, score: percentage });
+    }
+    return days;
+  }, [chartActivities, goals]);
+
+  // Channel breakdown for current user in leaderboard
+  const currentUserChannelBreakdown = useMemo(() => {
+    if (!metrics) return undefined;
+    return {
+      emails: metrics.weeklyEmailsSent,
+      calls: metrics.weeklyCallsMade,
+      dms: metrics.weeklyDmsSent,
+    };
+  }, [metrics]);
 
   const { updateProfile } = useUserPublicProfileMutations(
     user?.id,
@@ -123,6 +183,7 @@ const Networking: React.FC = () => {
           <ProfileCard
             profile={profile ?? null}
             metrics={metrics ?? null}
+            chartData={chartData}
             onUpdate={handleUpdateProfile}
             isUpdating={updateProfile.isPending}
           />
@@ -136,6 +197,7 @@ const Networking: React.FC = () => {
             period={period}
             onPeriodChange={setPeriod}
             isLoading={leaderboardLoading}
+            currentUserChannelBreakdown={currentUserChannelBreakdown}
           />
         </div>
       </div>

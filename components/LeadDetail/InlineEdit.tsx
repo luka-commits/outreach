@@ -96,16 +96,21 @@ const InlineEdit: React.FC<InlineEditProps> = memo(({
     );
   }
 
+  // Check if custom text styling is provided (contains text-* classes for size)
+  const hasCustomTextSize = /text-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)/.test(className);
+  // Extract text styling classes to apply to the text element
+  const textStyleClasses = className.match(/(text-\S+|font-\S+|tracking-\S+)/g)?.join(' ') || '';
+
   return (
     <div
       onClick={() => setIsEditing(true)}
-      className={`group flex items-center gap-2 cursor-pointer rounded-xl px-3 py-2 hover:bg-slate-50 transition-all ${className}`}
+      className="group flex items-center gap-2 cursor-pointer rounded-xl px-3 py-2 hover:bg-slate-50 transition-all"
       title="Click to edit"
     >
       {icon && <span className="text-slate-400 shrink-0">{icon}</span>}
       <div className="flex-1 min-w-0">
         {label && <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{label}</p>}
-        <p className={`text-sm font-medium truncate ${value ? 'text-slate-700' : 'text-slate-400 italic'}`}>
+        <p className={`truncate ${hasCustomTextSize ? textStyleClasses : 'text-sm font-medium text-slate-700'} ${!value ? 'text-slate-400 italic' : ''}`}>
           {value || placeholder}
         </p>
       </div>

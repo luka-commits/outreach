@@ -1,6 +1,12 @@
 import React from 'react';
-import { Trophy, Medal, Award, User, TrendingUp, Loader2 } from 'lucide-react';
+import { Trophy, Medal, Award, User, TrendingUp, Loader2, Mail, Phone, MessageCircle } from 'lucide-react';
 import { LeaderboardEntry, LeaderboardPeriod, UserRankInfo } from '../../types';
+
+interface ChannelBreakdown {
+  emails: number;
+  calls: number;
+  dms: number;
+}
 
 interface LeaderboardProps {
   entries: LeaderboardEntry[];
@@ -8,6 +14,7 @@ interface LeaderboardProps {
   period: LeaderboardPeriod;
   onPeriodChange: (period: LeaderboardPeriod) => void;
   isLoading: boolean;
+  currentUserChannelBreakdown?: ChannelBreakdown;
 }
 
 const Leaderboard: React.FC<LeaderboardProps> = ({
@@ -16,6 +23,7 @@ const Leaderboard: React.FC<LeaderboardProps> = ({
   period,
   onPeriodChange,
   isLoading,
+  currentUserChannelBreakdown,
 }) => {
   const getRankIcon = (rank: number) => {
     switch (rank) {
@@ -131,6 +139,7 @@ const Leaderboard: React.FC<LeaderboardProps> = ({
                 entry={entry}
                 rankIcon={getRankIcon(entry.rank)}
                 rankBadgeClass={getRankBadgeClass(entry.rank)}
+                channelBreakdown={entry.isCurrentUser ? currentUserChannelBreakdown : undefined}
               />
             ))}
           </div>
@@ -144,12 +153,14 @@ interface LeaderboardRowProps {
   entry: LeaderboardEntry;
   rankIcon: React.ReactNode | null;
   rankBadgeClass: string;
+  channelBreakdown?: ChannelBreakdown;
 }
 
 const LeaderboardRow: React.FC<LeaderboardRowProps> = ({
   entry,
   rankIcon,
   rankBadgeClass,
+  channelBreakdown,
 }) => (
   <div
     className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
@@ -190,8 +201,25 @@ const LeaderboardRow: React.FC<LeaderboardRowProps> = ({
           </span>
         )}
       </div>
-      {entry.bio && (
+      {entry.bio && !channelBreakdown && (
         <p className="text-xs text-slate-500 truncate">{entry.bio}</p>
+      )}
+      {/* Channel breakdown for current user */}
+      {channelBreakdown && (
+        <div className="flex items-center gap-3 mt-1">
+          <span className="flex items-center gap-1 text-xs text-slate-500">
+            <Mail size={12} className="text-rose-400" />
+            {channelBreakdown.emails}
+          </span>
+          <span className="flex items-center gap-1 text-xs text-slate-500">
+            <Phone size={12} className="text-emerald-400" />
+            {channelBreakdown.calls}
+          </span>
+          <span className="flex items-center gap-1 text-xs text-slate-500">
+            <MessageCircle size={12} className="text-blue-400" />
+            {channelBreakdown.dms}
+          </span>
+        </div>
       )}
     </div>
 

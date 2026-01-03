@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { User, Eye, EyeOff, Edit2, Check, X } from 'lucide-react';
+import { User, Eye, EyeOff, Edit2, Check, X, Mail, Phone, MessageCircle } from 'lucide-react';
 import { UserPublicProfile, UserActivityMetrics } from '../../types';
+import ConsistencyChart, { ChartDataPoint } from '../shared/ConsistencyChart';
 
 interface ProfileCardProps {
   profile: UserPublicProfile | null;
   metrics: UserActivityMetrics | null;
+  chartData?: ChartDataPoint[];
   onUpdate: (updates: Partial<UserPublicProfile>) => Promise<void>;
   isUpdating: boolean;
 }
@@ -12,6 +14,7 @@ interface ProfileCardProps {
 const ProfileCard: React.FC<ProfileCardProps> = ({
   profile,
   metrics,
+  chartData,
   onUpdate,
   isUpdating,
 }) => {
@@ -159,6 +162,49 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
         </div>
       )}
 
+      {/* Channel Breakdown */}
+      {metrics && (
+        <div className="mt-5 pt-5 border-t border-slate-100">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+            This Week by Channel
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <ChannelBox
+              icon={<Mail size={16} />}
+              label="Emails"
+              value={metrics.weeklyEmailsSent}
+              color="text-rose-500"
+              bgColor="bg-rose-50"
+            />
+            <ChannelBox
+              icon={<Phone size={16} />}
+              label="Calls"
+              value={metrics.weeklyCallsMade}
+              color="text-emerald-500"
+              bgColor="bg-emerald-50"
+            />
+            <ChannelBox
+              icon={<MessageCircle size={16} />}
+              label="DMs"
+              value={metrics.weeklyDmsSent}
+              color="text-blue-500"
+              bgColor="bg-blue-50"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Consistency Chart */}
+      {chartData && chartData.length > 0 && (
+        <div className="mt-5 pt-5 border-t border-slate-100">
+          <ConsistencyChart
+            data={chartData}
+            title="Your 7-Day Consistency"
+            height={180}
+          />
+        </div>
+      )}
+
       {/* Privacy Note */}
       {!profile?.isVisible && (
         <div className="mt-5 p-3 rounded-lg bg-amber-50 border border-amber-100">
@@ -175,6 +221,26 @@ const StatBox: React.FC<{ label: string; value: number }> = ({ label, value }) =
   <div className="text-center p-3 rounded-lg bg-slate-50">
     <p className="text-xl font-bold text-slate-900">{value.toLocaleString()}</p>
     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mt-0.5">
+      {label}
+    </p>
+  </div>
+);
+
+interface ChannelBoxProps {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  color: string;
+  bgColor: string;
+}
+
+const ChannelBox: React.FC<ChannelBoxProps> = ({ icon, label, value, color, bgColor }) => (
+  <div className={`text-center p-3 rounded-lg ${bgColor}`}>
+    <div className={`flex items-center justify-center mb-1 ${color}`}>
+      {icon}
+    </div>
+    <p className="text-lg font-bold text-slate-900">{value.toLocaleString()}</p>
+    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
       {label}
     </p>
   </div>

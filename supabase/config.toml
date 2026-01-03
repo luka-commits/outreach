@@ -1,5 +1,10 @@
 project_id = "gdlkwpmhxjaxialgvdyc"
 
+[functions.scrape-url]
+# JWT verification handled manually in function code (getUser validation)
+# Gateway JWT check disabled - auth is enforced in function code via getUser()
+verify_jwt = false
+
 [functions.start-scrape]
 # JWT verification handled manually in function code (getUser validation)
 # Keeps verify_jwt=false for compatibility but auth is still enforced

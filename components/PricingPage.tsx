@@ -13,7 +13,7 @@ const PricingPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         // This is the simplest way to accept payments without a backend server.
         // 1. Create a Payment Link in Stripe Dashboard.
         // 2. Paste the URL below.
-        const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/5kQbJ1aug0Z1agt4uudwc02";
+        const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/28EcN5bykcHJ74hf98dwc03";
 
         // Append user details for tracking
         const checkoutUrl = `${STRIPE_PAYMENT_LINK}?client_reference_id=${user?.id}&prefilled_email=${encodeURIComponent(user?.email || '')}`;
