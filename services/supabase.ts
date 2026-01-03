@@ -23,13 +23,31 @@ export async function getSession() {
   // First try refreshSession to get a fresh token (handles expired tokens)
   const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
 
+  if (refreshError) {
+    console.warn('refreshSession failed:', refreshError.message);
+  }
+
   if (!refreshError && refreshData.session) {
     return refreshData.session;
   }
 
   // Fall back to getSession (may return cached/stale token)
   const { data: sessionData } = await supabase.auth.getSession();
-  return sessionData.session;
+  const session = sessionData.session;
+
+  // Validate that the token hasn't expired
+  if (session) {
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = session.expires_at || 0;
+
+    if (expiresAt < now) {
+      // Token is expired and refresh failed - user needs to re-login
+      console.warn('Session expired and refresh failed. User needs to re-login.');
+      return null;
+    }
+  }
+
+  return session;
 }
 
 // Database row types (snake_case from Supabase)
