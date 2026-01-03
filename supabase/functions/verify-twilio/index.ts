@@ -1,22 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-
-// CORS configuration
-const getAllowedOrigin = (req: Request): string => {
-  const origin = req.headers.get('Origin') || '';
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
-
-  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
-    return origin || '*';
-  }
-
-  return allowedOrigins[0];
-};
-
-const getCorsHeaders = (req: Request) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(req),
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-});
+import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse } from "../_shared/cors.ts"
 
 interface VerifyRequest {
   accountSid: string;
@@ -27,11 +11,15 @@ interface VerifyRequest {
 }
 
 serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
-
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  const preflightResponse = handleCorsPreflightIfNeeded(req);
+  if (preflightResponse) return preflightResponse;
+
+  let corsHeaders: Record<string, string>;
+  try {
+    corsHeaders = getCorsHeaders(req);
+  } catch (error) {
+    return createErrorResponse(req, 'CORS not configured', 403);
   }
 
   try {
@@ -199,12 +187,17 @@ serve(async (req) => {
         });
     }
   } catch (error) {
-    console.error('Error verifying Twilio:', error);
+    console.error('Error verifying Twilio');
+    let corsHeadersFallback: Record<string, string>;
+    try {
+      corsHeadersFallback = getCorsHeaders(req);
+    } catch {
+      corsHeadersFallback = { 'Content-Type': 'application/json' };
+    }
     return new Response(JSON.stringify({
       error: 'Failed to verify Twilio configuration',
-      details: error instanceof Error ? error.message : 'Unknown error'
     }), {
-      headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' },
+      headers: { ...corsHeadersFallback, 'Content-Type': 'application/json' },
       status: 500,
     });
   }

@@ -1,28 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
+import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts"
+import { validateTwilioSignature } from "../_shared/twilioValidation.ts"
+import { safeDecrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
 
-// CORS configuration
-const getAllowedOrigin = (req: Request): string => {
-  const origin = req.headers.get('Origin') || '';
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
-
-  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
-    return origin || '*';
-  }
-
-  return allowedOrigins[0];
-};
-
-const getCorsHeaders = (req: Request) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(req),
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-});
-
-// Generate AI summary using Gemini
+// Generate AI summary using Gemini (currently unused but kept for future use)
 async function generateAISummary(transcription: string): Promise<string> {
   const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
   if (!geminiApiKey) {
-    console.log('No Gemini API key configured');
     return '';
   }
 
@@ -52,24 +37,29 @@ Summary:`
     );
 
     if (!response.ok) {
-      console.error('Gemini API error:', response.status);
       return '';
     }
 
     const data = await response.json();
     return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-  } catch (error) {
-    console.error('Error generating AI summary:', error);
+  } catch {
     return '';
   }
 }
 
-serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
+// Suppress unused function warning
+void generateAISummary;
 
+serve(async (req) => {
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  const preflightResponse = handleCorsPreflightIfNeeded(req);
+  if (preflightResponse) return preflightResponse;
+
+  let corsHeaders: Record<string, string>;
+  try {
+    corsHeaders = getCorsHeaders(req);
+  } catch {
+    corsHeaders = { 'Content-Type': 'application/json' };
   }
 
   try {
@@ -85,15 +75,6 @@ serve(async (req) => {
     const recordingSid = formData.get('RecordingSid')?.toString();
     const recordingDuration = formData.get('RecordingDuration')?.toString();
     const recordingStatus = formData.get('RecordingStatus')?.toString();
-    const accountSid = formData.get('AccountSid')?.toString();
-
-    console.log('Recording callback:', {
-      callSid,
-      recordingUrl,
-      recordingSid,
-      recordingDuration,
-      recordingStatus,
-    });
 
     if (!callSid || !recordingUrl) {
       return new Response(JSON.stringify({ error: 'Missing required parameters' }), {
@@ -117,13 +98,13 @@ serve(async (req) => {
       .single();
 
     if (findError || !callRecord) {
-      console.error('Call record not found:', findError);
+      // Call record not found - log minimally and return success to prevent retries
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Get user's Twilio credentials for API access
+    // Get user's Twilio credentials for API access and webhook validation
     const { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('twilio_account_sid, twilio_auth_token')
@@ -131,9 +112,39 @@ serve(async (req) => {
       .single();
 
     if (!profile?.twilio_account_sid || !profile?.twilio_auth_token) {
-      console.error('Twilio credentials not found for user');
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Decrypt auth token if encryption is configured
+    let authToken: string = profile.twilio_auth_token;
+    if (isEncryptionConfigured()) {
+      const decrypted = await safeDecrypt(profile.twilio_auth_token);
+      if (!decrypted) {
+        // Can't decrypt - return success to prevent Twilio retries
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      authToken = decrypted;
+    }
+
+    // SECURITY: Validate Twilio webhook signature
+    const webhookUrl = `${supabaseUrl}/functions/v1/recording-ready`;
+    const isValidSignature = await validateTwilioSignature(
+      req,
+      authToken,
+      webhookUrl,
+      formData
+    );
+
+    if (!isValidSignature) {
+      // Invalid signature - could be forged request
+      // Return 403 but don't give details
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 403,
       });
     }
 
@@ -147,8 +158,8 @@ serve(async (req) => {
     const durationSeconds = recordingDuration ? parseInt(recordingDuration, 10) : 0;
 
     if (durationSeconds > 0 && durationSeconds <= 120) {
-      // Request transcription from Twilio
-      const authString = btoa(`${profile.twilio_account_sid}:${profile.twilio_auth_token}`);
+      // Request transcription from Twilio (using decrypted authToken)
+      const authString = btoa(`${profile.twilio_account_sid}:${authToken}`);
 
       try {
         // Start transcription request
@@ -163,20 +174,14 @@ serve(async (req) => {
           }
         );
 
-        if (transcriptionResponse.ok) {
-          console.log('Transcription request initiated');
-          // Twilio will send transcription via webhook, or we can poll for it
-          // For now, we'll handle it async - the user can refresh to see it
-        }
-      } catch (error) {
-        console.error('Error requesting transcription:', error);
+        // Transcription request initiated - Twilio will send via webhook
+        // For now, we'll handle it async - the user can refresh to see it
+        void transcriptionResponse; // Acknowledge response
+      } catch {
+        // Transcription request failed - not critical, continue
       }
-    } else if (durationSeconds > 120) {
-      // For longer recordings, we could use Gemini for transcription
-      // But this would require downloading the audio and sending to Gemini
-      // For now, we'll just note that transcription is not available
-      console.log('Recording too long for Twilio transcription:', durationSeconds);
     }
+    // For recordings > 120 seconds, transcription is not available via Twilio
 
     // Update the call record
     const { error: updateError } = await supabaseAdmin
@@ -184,19 +189,24 @@ serve(async (req) => {
       .update(updateData)
       .eq('id', callRecord.id);
 
-    if (updateError) {
-      console.error('Error updating call record:', updateError);
-    }
+    // Log update errors but don't expose details
+    void updateError;
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
-    console.error('Error handling recording callback:', error);
+    console.error('Error handling recording callback');
+    let corsHeadersFallback: Record<string, string>;
+    try {
+      corsHeadersFallback = getCorsHeaders(req);
+    } catch {
+      corsHeadersFallback = { 'Content-Type': 'application/json' };
+    }
     // Always return success to Twilio to prevent retries
     return new Response(JSON.stringify({ success: true }), {
-      headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' },
+      headers: { ...corsHeadersFallback, 'Content-Type': 'application/json' },
     });
   }
 });

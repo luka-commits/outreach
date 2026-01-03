@@ -1,29 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-
-// CORS configuration
-const getAllowedOrigin = (req: Request): string => {
-  const origin = req.headers.get('Origin') || '';
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
-
-  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
-    return origin || '*';
-  }
-
-  return allowedOrigins[0];
-};
-
-const getCorsHeaders = (req: Request) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(req),
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-});
+import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse } from "../_shared/cors.ts"
+import { encrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
 
 serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
-
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+  const preflightResponse = handleCorsPreflightIfNeeded(req);
+  if (preflightResponse) return preflightResponse;
+
+  let corsHeaders: Record<string, string>;
+  try {
+    corsHeaders = getCorsHeaders(req);
+  } catch (error) {
+    return createErrorResponse(req, 'CORS not configured', 403);
   }
 
   try {
@@ -70,8 +59,9 @@ serve(async (req) => {
 
     // 5. Exchange authorization code for tokens
     const gmailClientId = Deno.env.get('GMAIL_CLIENT_ID');
+    const gmailClientSecret = Deno.env.get('GMAIL_CLIENT_SECRET');
 
-    if (!gmailClientId) {
+    if (!gmailClientId || !gmailClientSecret) {
       return new Response(JSON.stringify({ error: 'Gmail OAuth not configured on server' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500,
@@ -85,6 +75,7 @@ serve(async (req) => {
       },
       body: new URLSearchParams({
         client_id: gmailClientId,
+        client_secret: gmailClientSecret,
         code: code,
         code_verifier: codeVerifier,
         grant_type: 'authorization_code',
@@ -95,7 +86,8 @@ serve(async (req) => {
     const tokenData = await tokenResponse.json();
 
     if (!tokenResponse.ok) {
-      console.error('Token exchange failed:', tokenData);
+      // Don't log full token data - may contain sensitive info
+      console.error('Token exchange failed:', tokenData.error || 'Unknown error');
       return new Response(JSON.stringify({
         error: 'Failed to exchange code for tokens',
         details: tokenData.error_description || tokenData.error
@@ -117,7 +109,7 @@ serve(async (req) => {
     const userInfo = await userInfoResponse.json();
 
     if (!userInfoResponse.ok) {
-      console.error('Failed to get user info:', userInfo);
+      console.error('Failed to get user info');
       return new Response(JSON.stringify({ error: 'Failed to get user email' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
@@ -129,12 +121,29 @@ serve(async (req) => {
     // 7. Calculate expiration timestamp
     const expiresAt = new Date(Date.now() + expires_in * 1000).toISOString();
 
-    // 8. Store credentials in profiles table
+    // 8. Store credentials in profiles table (encrypted if configured)
+    let accessTokenToStore = access_token;
+    let refreshTokenToStore = refresh_token;
+
+    if (isEncryptionConfigured()) {
+      try {
+        accessTokenToStore = await encrypt(access_token);
+        refreshTokenToStore = await encrypt(refresh_token);
+      } catch (encryptError) {
+        // Log error but don't expose details to client
+        console.error('Encryption failed');
+        return new Response(JSON.stringify({ error: 'Failed to secure credentials' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500,
+        });
+      }
+    }
+
     const { error: updateError } = await supabaseAdmin
       .from('profiles')
       .update({
-        gmail_access_token: access_token,
-        gmail_refresh_token: refresh_token,
+        gmail_access_token: accessTokenToStore,
+        gmail_refresh_token: refreshTokenToStore,
         gmail_token_expires_at: expiresAt,
         gmail_email: gmailEmail,
         email_provider: 'gmail',
@@ -142,31 +151,36 @@ serve(async (req) => {
       .eq('id', user.id);
 
     if (updateError) {
-      console.error('Failed to store credentials:', updateError);
+      // Don't log full error details
+      console.error('Failed to store credentials');
       return new Response(JSON.stringify({ error: 'Failed to store credentials' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500,
       });
     }
 
-    // 9. Return success with credentials for client-side cache
+    // 9. Return success WITHOUT exposing tokens to client
+    // SECURITY: Tokens are stored server-side only
     return new Response(JSON.stringify({
       success: true,
       email: gmailEmail,
-      accessToken: access_token,
-      refreshToken: refresh_token,
-      expiresAt: expiresAt,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
-    console.error('Error in gmail-oauth-callback:', error);
+    // Don't log full error details that might contain tokens
+    console.error('Error in gmail-oauth-callback');
+    let corsHeadersFallback: Record<string, string>;
+    try {
+      corsHeadersFallback = getCorsHeaders(req);
+    } catch {
+      corsHeadersFallback = { 'Content-Type': 'application/json' };
+    }
     return new Response(JSON.stringify({
       error: 'Internal server error',
-      details: error instanceof Error ? error.message : 'Unknown error'
     }), {
-      headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' },
+      headers: { ...corsHeadersFallback, 'Content-Type': 'application/json' },
       status: 500,
     });
   }

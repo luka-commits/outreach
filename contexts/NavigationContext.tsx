@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 
-export type View = 'dashboard' | 'leads' | 'queue' | 'detail' | 'strategies' | 'reporting' | 'finder' | 'profile' | 'pricing';
+export type View = 'starthere' | 'dashboard' | 'leads' | 'queue' | 'detail' | 'strategies' | 'reporting' | 'finder' | 'profile' | 'pricing' | 'duplicates' | 'networking';
 
 interface NavigationContextType {
   currentView: View;
@@ -30,7 +30,8 @@ export const NavigationProvider: React.FC<NavigationProviderProps> = ({ children
   const [history, setHistory] = useState<View[]>([]);
 
   const navigate = useCallback((view: View, leadId?: string) => {
-    setHistory((prev) => [...prev, currentView]);
+    // Cap history to 20 entries to prevent memory leak
+    setHistory((prev) => [...prev.slice(-19), currentView]);
     setCurrentView(view);
     if (leadId) {
       setSelectedLeadId(leadId);
@@ -40,7 +41,8 @@ export const NavigationProvider: React.FC<NavigationProviderProps> = ({ children
   }, [currentView]);
 
   const navigateToLead = useCallback((leadId: string) => {
-    setHistory((prev) => [...prev, currentView]);
+    // Cap history to 20 entries to prevent memory leak
+    setHistory((prev) => [...prev.slice(-19), currentView]);
     setSelectedLeadId(leadId);
     setCurrentView('detail');
   }, [currentView]);

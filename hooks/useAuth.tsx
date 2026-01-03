@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../services/supabase';
 
@@ -18,6 +18,9 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<{ needsEmailVerification: boolean }>;
+  resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -37,8 +40,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch user profile from profiles table
-  const fetchProfile = async (userId: string) => {
+  // Fetch user profile with retry pattern for new users
+  // New users may not have a profile immediately (database trigger creates it)
+  const fetchProfileWithRetry = useCallback(async (userId: string, attempt = 0): Promise<void> => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -48,11 +52,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) throw error;
       setProfile(data);
-    } catch (err) {
-      console.error('Error fetching profile:', err);
-      setProfile(null);
+    } catch (error) {
+      if (attempt < 3) {
+        // Exponential backoff: 500ms, 1000ms, 2000ms
+        const delay = 500 * Math.pow(2, attempt);
+        setTimeout(() => fetchProfileWithRetry(userId, attempt + 1), delay);
+      } else {
+        // After 3 retries, give up - user may not have a profile yet
+        console.warn('Profile fetch failed after retries (may be expected for new users):', error);
+        setProfile(null);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     // Get initial session
@@ -60,23 +71,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        fetchProfileWithRetry(session.user.id);
       }
       setLoading(false);
-    }).catch((err) => {
-      console.error('Session check failed:', err);
+    }).catch((error) => {
+      // Session check failed - user will need to sign in
+      console.error('Failed to get session:', error);
       setLoading(false);
     });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          // Small delay to allow trigger to create profile
-          setTimeout(() => fetchProfile(session.user.id), 500);
+          // Use retry pattern for new users (profile may not exist immediately)
+          fetchProfileWithRetry(session.user.id);
         } else {
           setProfile(null);
         }
@@ -86,7 +98,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [fetchProfileWithRetry]);
 
   const signInWithGoogle = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -94,6 +106,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       options: {
         redirectTo: window.location.origin,
       },
+    });
+    if (error) throw error;
+  };
+
+  const signInWithEmail = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
+  };
+
+  const signUpWithEmail = async (email: string, password: string): Promise<{ needsEmailVerification: boolean }> => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+    if (error) throw error;
+
+    // Check if email confirmation is required
+    // If user exists but session is null, email verification is pending
+    const needsEmailVerification = data.user !== null && data.session === null;
+    return { needsEmailVerification };
+  };
+
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
     });
     if (error) throw error;
   };
@@ -107,7 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, session, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ user, profile, session, loading, signInWithGoogle, signInWithEmail, signUpWithEmail, resetPassword, signOut }}>
       {children}
     </AuthContext.Provider>
   );

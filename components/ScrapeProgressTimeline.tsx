@@ -90,11 +90,10 @@ const ScrapeProgressTimeline: React.FC<ScrapeProgressTimelineProps> = ({ job }) 
 
         {/* Nodes */}
         <div className="relative flex justify-between">
-          {stages.map((stage, index) => {
+          {stages.map((stage) => {
             const stageIdx = getStageIndex(stage.key);
             const isActive = job.stage === stage.key;
             const isPast = currentStageIndex > stageIdx;
-            const isFutureAndFailed = isFailed && currentStageIndex <= stageIdx;
 
             return (
               <div key={stage.key} className="flex flex-col items-center group">
@@ -113,7 +112,7 @@ const ScrapeProgressTimeline: React.FC<ScrapeProgressTimelineProps> = ({ job }) 
                   ) : isFailed && currentStageIndex === stageIdx ? (
                     <AlertCircle size={16} className="text-red-500" />
                   ) : (
-                    React.cloneElement(stage.icon as React.ReactElement, { size: 16 })
+                    React.cloneElement(stage.icon as React.ReactElement<{ size?: number }>, { size: 16 })
                   )}
                 </div>
 

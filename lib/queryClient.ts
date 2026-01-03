@@ -33,6 +33,12 @@ export const queryKeys = {
   activities: (userId: string) => ['activities', userId] as const,
   activitiesByLead: (userId: string, leadId: string) =>
     ['activities', userId, 'byLead', leadId] as const,
+  activitiesPaginated: (userId: string | undefined, options: { startDate?: string; endDate?: string; limit?: number }) =>
+    ['activities', userId, 'paginated', options] as const,
+
+  // Lead Counts
+  leadCounts: (userId: string | undefined) => ['lead-counts', userId] as const,
+  leadStatusCounts: (userId: string | undefined) => ['lead-status-counts', userId] as const,
 
   // Strategies
   strategies: (userId: string) => ['strategies', userId] as const,
@@ -59,6 +65,72 @@ export const queryKeys = {
   gmailCredentials: (userId: string | undefined) => ['gmailCredentials', userId] as const,
   resendCredentials: (userId: string | undefined) => ['resendCredentials', userId] as const,
   emailProvider: (userId: string | undefined) => ['emailProvider', userId] as const,
+
+  // Lead Tags
+  leadTags: (userId: string | undefined) => ['leadTags', userId] as const,
+  leadTagsForLead: (userId: string | undefined, leadId: string) =>
+    ['leadTags', userId, 'byLead', leadId] as const,
+
+  // Lead Notes
+  notesByLead: (userId: string | undefined, leadId: string) =>
+    ['leadNotes', userId, 'byLead', leadId] as const,
+
+  // Strategy Performance
+  strategyPerformance: (userId: string | undefined) =>
+    ['strategyPerformance', userId] as const,
+
+  // Saved Filters / Smart Lists
+  savedFilters: (userId: string | undefined) => ['savedFilters', userId] as const,
+  savedFilterCounts: (userId: string | undefined) => ['savedFilterCounts', userId] as const,
+
+  // Duplicate Detection
+  duplicates: (userId: string | undefined, type: string) => ['duplicates', userId, type] as const,
+  duplicatesSummary: (userId: string | undefined) => ['duplicates', userId, 'summary'] as const,
+
+  // Tasks
+  tasks: (userId: string | undefined) => ['tasks', userId] as const,
+  tasksAllScheduled: (userId: string | undefined) => ['tasks', userId, 'all-scheduled'] as const,
+  tasksCounts: (userId: string | undefined) => ['tasks', userId, 'counts'] as const,
+
+  // Lead Tags - prefix for bulk invalidation of lead-specific tag queries
+  leadTagsByLeadPrefix: (userId: string | undefined) => ['leadTags', userId, 'byLead'] as const,
+
+  // Reporting Analytics
+  staleLeadsCount: (userId: string | undefined) => ['reporting', userId, 'staleLeads'] as const,
+  channelPerformance: (userId: string | undefined) => ['reporting', userId, 'channelPerformance'] as const,
+  weeklyTrends: (userId: string | undefined, weeks: number) => ['reporting', userId, 'weeklyTrends', weeks] as const,
+  avgDaysOverdue: (userId: string | undefined) => ['reporting', userId, 'avgDaysOverdue'] as const,
+  reportingDashboard: (userId: string | undefined, staleDays: number, trendWeeks: number) =>
+    ['reporting', userId, 'dashboard', staleDays, trendWeeks] as const,
+
+  // Subscription
+  subscription: (userId: string | undefined) => ['subscription', userId] as const,
+
+  // Scrape Usage (monthly limit tracking)
+  scrapeUsage: (userId: string | undefined) => ['scrapeUsage', userId] as const,
+  urlScrapeUsage: (userId: string | undefined) => ['urlScrapeUsage', userId] as const,
+
+  // Networking / Leaderboard
+  userPublicProfile: (userId: string | undefined) => ['networking', userId, 'profile'] as const,
+  userActivityMetrics: (userId: string | undefined) => ['networking', userId, 'metrics'] as const,
+  leaderboard: (userId: string | undefined, period: string) =>
+    ['networking', userId, 'leaderboard', period] as const,
+  userRank: (userId: string | undefined, period: string) =>
+    ['networking', userId, 'rank', period] as const,
+
+  // Unified Lead Timeline (activities + call records combined)
+  leadTimeline: (userId: string | undefined, leadId: string) =>
+    ['leadTimeline', userId, leadId] as const,
+
+  // Custom Fields
+  customFieldDefinitions: (userId: string | undefined) =>
+    ['customFields', userId, 'definitions'] as const,
+  customFieldValues: (userId: string | undefined, leadId: string) =>
+    ['customFields', userId, 'values', leadId] as const,
+  customFieldValuesPrefix: (userId: string | undefined) =>
+    ['customFields', userId, 'values'] as const,
+  customFieldHasValues: (userId: string | undefined, fieldId: string) =>
+    ['customFields', userId, 'hasValues', fieldId] as const,
 } as const;
 
 // Helper for invalidating related queries

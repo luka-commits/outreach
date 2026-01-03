@@ -3,6 +3,7 @@ import * as api from '../../services/supabase';
 import { OutreachGoals } from '../../types';
 import { queryKeys } from '../../lib/queryClient';
 import { useRef, useCallback, useEffect } from 'react';
+import { getErrorMessage } from '../../utils/errorMessages';
 
 const DEFAULT_GOALS: OutreachGoals = {
   instagram: 25,
@@ -31,12 +32,20 @@ export function useGoalsQuery(userId: string | undefined) {
 /**
  * Mutation hook for updating goals with debouncing.
  */
-export function useGoalsMutations(userId: string | undefined) {
+export function useGoalsMutations(userId: string | undefined, onError?: (message: string) => void) {
   const queryClient = useQueryClient();
-  const timeoutRef = useRef<NodeJS.Timeout>();
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const updateGoals = useMutation({
     mutationFn: (goals: OutreachGoals) => api.updateGoals(goals, userId!),
+    onError: (error) => {
+      const message = getErrorMessage(error);
+      onError?.(message);
+      // Rollback: invalidate to refetch the correct goals
+      if (userId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.goals(userId) });
+      }
+    },
   });
 
   // Debounced update function
@@ -76,9 +85,9 @@ export function useGoalsMutations(userId: string | undefined) {
  * Combined hook that provides both query and mutations.
  * Drop-in replacement for useGoals hook.
  */
-export function useGoals(userId: string | undefined) {
+export function useGoals(userId: string | undefined, onMutationError?: (message: string) => void) {
   const { data = DEFAULT_GOALS, isLoading, error, refetch } = useGoalsQuery(userId);
-  const { updateGoals } = useGoalsMutations(userId);
+  const { updateGoals } = useGoalsMutations(userId, onMutationError);
 
   return {
     goals: data,

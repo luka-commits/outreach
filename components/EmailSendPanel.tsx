@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Mail, Loader2, CheckCircle2, AlertCircle, Copy, ExternalLink } from 'lucide-react';
 import { Lead } from '../types';
 import { getSession } from '../services/supabase';
 import { useHasEmailConfigured } from '../hooks/queries/useEmailSettingsQuery';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 interface EmailSendPanelProps {
   lead: Lead;
@@ -23,8 +24,18 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const completeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const copyTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { isConfigured, isLoading: configLoading, provider, gmailConfigured, resendConfigured } = useHasEmailConfigured();
+  const { isConfigured, isLoading: configLoading, provider } = useHasEmailConfigured();
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   const handleSendEmail = async () => {
     if (!lead.email) return;
@@ -39,18 +50,22 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
       }
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const response = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
+      const response = await fetchWithTimeout(
+        `${supabaseUrl}/functions/v1/send-email`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            leadId: lead.id,
+            subject,
+            bodyHtml: message,
+          }),
         },
-        body: JSON.stringify({
-          leadId: lead.id,
-          subject,
-          bodyHtml: message,
-        }),
-      });
+        30000 // 30 second timeout
+      );
 
       const result = await response.json();
 
@@ -61,8 +76,8 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
       setSent(true);
       onSend();
 
-      // Auto-complete after a short delay
-      setTimeout(() => {
+      // Auto-complete after a short delay (with cleanup)
+      completeTimerRef.current = setTimeout(() => {
         onComplete();
       }, 1500);
 
@@ -78,9 +93,10 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
     try {
       await navigator.clipboard.writeText(message);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      console.error('Failed to copy');
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      setError('Failed to copy to clipboard. Please copy manually.');
     }
   };
 
@@ -102,10 +118,10 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
   if (!lead.email) {
     return (
       <div className="space-y-4">
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
           <div className="flex items-center gap-2 text-amber-800">
             <AlertCircle size={18} />
-            <span className="font-bold">No email address</span>
+            <span className="font-medium">No email address</span>
           </div>
           <p className="text-sm text-amber-700 mt-1">
             This lead doesn't have an email address. Add one to send emails.
@@ -119,10 +135,10 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
   if (!isConfigured) {
     return (
       <div className="space-y-4">
-        <div className="bg-slate-50 rounded-2xl p-4">
+        <div className="bg-slate-50 rounded-lg p-4">
           <div className="flex items-center gap-2 text-slate-600 mb-2">
             <Mail size={18} />
-            <span className="font-bold">Email not set up</span>
+            <span className="font-medium">Email not set up</span>
           </div>
           <p className="text-sm text-slate-500 mb-4">
             Connect Gmail or Resend in Settings to send emails directly.
@@ -134,7 +150,7 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
           href={getMailtoLink()}
           target="_blank"
           rel="noopener noreferrer"
-          className="w-full py-4 bg-purple-600 text-white font-bold rounded-2xl hover:bg-purple-700
+          className="w-full py-4 bg-purple-600 text-white font-medium rounded-md hover:bg-purple-700
                      transition-colors flex items-center justify-center gap-2"
         >
           <ExternalLink size={18} />
@@ -143,7 +159,7 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
 
         <button
           onClick={handleCopyToClipboard}
-          className="w-full py-3 text-slate-500 text-sm hover:bg-slate-100 rounded-xl transition-colors
+          className="w-full py-3 text-slate-500 text-sm hover:bg-slate-100 rounded-md transition-colors
                      flex items-center justify-center gap-2"
         >
           {copied ? <CheckCircle2 size={16} /> : <Copy size={16} />}
@@ -157,7 +173,7 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
   if (sent) {
     return (
       <div className="space-y-4">
-        <div className="bg-green-50 border border-green-200 rounded-2xl p-6 text-center">
+        <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
           <CheckCircle2 className="text-green-600 mx-auto mb-3" size={48} />
           <p className="font-bold text-green-800 text-lg">Email Sent!</p>
           <p className="text-sm text-green-700 mt-1">
@@ -173,7 +189,7 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
   return (
     <div className="space-y-4">
       {/* Email preview */}
-      <div className="bg-slate-50 rounded-2xl p-4 text-sm">
+      <div className="bg-slate-50 rounded-lg p-4 text-sm">
         <div className="flex justify-between text-slate-600 mb-2">
           <span className="font-medium">To:</span>
           <span className="font-mono text-slate-800">{lead.email}</span>
@@ -184,10 +200,10 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
         </div>
         <div className="flex justify-between text-slate-600">
           <span className="font-medium">Via:</span>
-          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
             provider === 'gmail'
               ? 'bg-purple-100 text-purple-700'
-              : 'bg-indigo-100 text-indigo-700'
+              : 'bg-blue-100 text-blue-700'
           }`}>
             {provider === 'gmail' ? 'Gmail' : 'Resend'}
           </span>
@@ -196,7 +212,7 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+        <div className="bg-red-50 border border-red-200 rounded-md p-3">
           <div className="flex items-center gap-2 text-red-700 text-sm">
             <AlertCircle size={16} />
             <span>{error}</span>
@@ -208,9 +224,9 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
       <button
         onClick={handleSendEmail}
         disabled={sending || !lead.email}
-        className="w-full py-5 rounded-[1.5rem] bg-purple-600 text-white font-bold text-lg
+        className="w-full py-5 rounded-md bg-purple-600 text-white font-bold text-lg
                    hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed
-                   transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-200"
+                   transition-all flex items-center justify-center gap-3 shadow-sm"
       >
         {sending ? (
           <>
@@ -231,7 +247,7 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
           href={getMailtoLink()}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-1 py-3 text-slate-500 text-sm hover:bg-slate-100 rounded-xl transition-colors
+          className="flex-1 py-3 text-slate-500 text-sm hover:bg-slate-100 rounded-md transition-colors
                      flex items-center justify-center gap-2"
         >
           <ExternalLink size={14} />
@@ -239,7 +255,7 @@ const EmailSendPanel: React.FC<EmailSendPanelProps> = ({
         </a>
         <button
           onClick={handleCopyToClipboard}
-          className="flex-1 py-3 text-slate-500 text-sm hover:bg-slate-100 rounded-xl transition-colors
+          className="flex-1 py-3 text-slate-500 text-sm hover:bg-slate-100 rounded-md transition-colors
                      flex items-center justify-center gap-2"
         >
           {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}

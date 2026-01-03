@@ -208,7 +208,7 @@ const TwilioSetupWizard: React.FC<TwilioSetupWizardProps> = ({ onClose, onComple
       await updateCredentials.mutateAsync(credentials);
       showToast('Twilio setup complete! You can now make calls.', 'success');
       onComplete();
-    } catch (error) {
+    } catch {
       showToast('Failed to save credentials. Please try again.', 'error');
     }
   };
@@ -257,7 +257,7 @@ const TwilioSetupWizard: React.FC<TwilioSetupWizardProps> = ({ onClose, onComple
               </div>
               <h2 className="text-2xl font-black text-slate-900 mb-2">Create a Twilio Account</h2>
               <p className="text-slate-500">
-                Twilio powers the phone calls in OutreachPilot. Create a free account to get started.
+                Twilio powers the phone calls in Outbound Pilot. Create a free account to get started.
               </p>
             </div>
 
@@ -411,7 +411,7 @@ const TwilioSetupWizard: React.FC<TwilioSetupWizardProps> = ({ onClose, onComple
                   </a>
                 </li>
                 <li>Click &quot;Create new TwiML App&quot;</li>
-                <li>Name it &quot;OutreachPilot Calling&quot;</li>
+                <li>Name it &quot;Outbound Pilot Calling&quot;</li>
                 <li>Set the Voice Request URL (copy below):</li>
               </ol>
 

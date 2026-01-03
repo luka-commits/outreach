@@ -1,75 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-
-// CORS configuration
-const getAllowedOrigin = (req: Request): string => {
-  const origin = req.headers.get('Origin') || '';
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
-
-  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
-    return origin || '*';
-  }
-
-  return allowedOrigins[0];
-};
-
-const getCorsHeaders = (req: Request) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(req),
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-});
-
-// Validate Twilio webhook signature
-async function validateTwilioSignature(
-  req: Request,
-  authToken: string,
-  url: string
-): Promise<boolean> {
-  const signature = req.headers.get('X-Twilio-Signature');
-  if (!signature) {
-    console.log('No Twilio signature header');
-    return false;
-  }
-
-  // For webhook validation, we need to construct the signature base string
-  // This is URL + sorted POST params
-  const formData = await req.clone().formData();
-  const params: Record<string, string> = {};
-  formData.forEach((value, key) => {
-    params[key] = value.toString();
-  });
-
-  // Sort params by key
-  const sortedKeys = Object.keys(params).sort();
-  let data = url;
-  for (const key of sortedKeys) {
-    data += key + params[key];
-  }
-
-  // HMAC-SHA1 signature
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(authToken);
-  const signatureData = encoder.encode(data);
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'HMAC', hash: 'SHA-1' },
-    false,
-    ['sign']
-  );
-
-  const signatureBuffer = await crypto.subtle.sign('HMAC', key, signatureData);
-  const expectedSignature = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
-
-  return signature === expectedSignature;
-}
+import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts"
+import { validateTwilioSignature } from "../_shared/twilioValidation.ts"
+import { safeDecrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
 
 serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
-
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  const preflightResponse = handleCorsPreflightIfNeeded(req);
+  if (preflightResponse) return preflightResponse;
+
+  let corsHeaders: Record<string, string>;
+  try {
+    corsHeaders = getCorsHeaders(req);
+  } catch {
+    corsHeaders = { 'Content-Type': 'text/xml' };
   }
 
   try {
@@ -140,6 +84,52 @@ serve(async (req) => {
       );
     }
 
+    // SECURITY: Validate Twilio webhook signature
+    if (profile.twilio_auth_token) {
+      // Decrypt auth token if encryption is configured
+      let authToken: string = profile.twilio_auth_token;
+      if (isEncryptionConfigured()) {
+        const decrypted = await safeDecrypt(profile.twilio_auth_token);
+        if (!decrypted) {
+          // Can't decrypt - reject the request
+          return new Response(
+            `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Configuration error. Please reconfigure your account.</Say>
+  <Hangup/>
+</Response>`,
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+            }
+          );
+        }
+        authToken = decrypted;
+      }
+
+      const webhookUrl = `${supabaseUrl}/functions/v1/twilio-voice`;
+      const isValidSignature = await validateTwilioSignature(
+        req,
+        authToken,
+        webhookUrl,
+        formData
+      );
+
+      if (!isValidSignature) {
+        // Invalid signature - could be forged request
+        return new Response(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Unauthorized request.</Say>
+  <Hangup/>
+</Response>`,
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+            status: 403,
+          }
+        );
+      }
+    }
+
     // Update call record with Twilio call SID
     if (callRecordId) {
       await supabaseAdmin
@@ -172,7 +162,13 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error('Error handling Twilio voice:', error);
+    console.error('Error handling Twilio voice');
+    let corsHeadersFallback: Record<string, string>;
+    try {
+      corsHeadersFallback = getCorsHeaders(req);
+    } catch {
+      corsHeadersFallback = { 'Content-Type': 'text/xml' };
+    }
     return new Response(
       `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -180,7 +176,7 @@ serve(async (req) => {
   <Hangup/>
 </Response>`,
       {
-        headers: { ...getCorsHeaders(req), 'Content-Type': 'text/xml' },
+        headers: { ...corsHeadersFallback, 'Content-Type': 'text/xml' },
       }
     );
   }

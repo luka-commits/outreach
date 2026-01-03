@@ -28,16 +28,20 @@ CREATE TABLE IF NOT EXISTS call_records (
 -- Enable Row Level Security
 ALTER TABLE call_records ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies for call_records
+-- RLS Policies for call_records (drop if exists, then create)
+DROP POLICY IF EXISTS "Users can view own calls" ON call_records;
 CREATE POLICY "Users can view own calls" ON call_records
   FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own calls" ON call_records;
 CREATE POLICY "Users can insert own calls" ON call_records
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own calls" ON call_records;
 CREATE POLICY "Users can update own calls" ON call_records
   FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own calls" ON call_records;
 CREATE POLICY "Users can delete own calls" ON call_records
   FOR DELETE USING (auth.uid() = user_id);
 

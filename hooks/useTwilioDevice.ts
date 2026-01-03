@@ -3,6 +3,7 @@ import { Device, Call } from '@twilio/voice-sdk';
 import { useToast } from '../components/Toast';
 import { getSession } from '../services/supabase';
 import { CallStatus } from '../types';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 type DeviceStatus = 'offline' | 'connecting' | 'ready' | 'busy';
 
@@ -40,13 +41,17 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
       throw new Error('Not authenticated');
     }
 
-    const response = await fetch(`${supabaseUrl}/functions/v1/twilio-token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
+    const response = await fetchWithTimeout(
+      `${supabaseUrl}/functions/v1/twilio-token`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
       },
-    });
+      15000 // 15 second timeout for token fetch
+    );
 
     if (!response.ok) {
       const error = await response.json();
@@ -60,7 +65,7 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
   // Initialize Twilio Device
   const initialize = useCallback(async () => {
     if (device) {
-      console.log('Device already initialized');
+      console.warn('Device already initialized');
       return;
     }
 
@@ -75,7 +80,7 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
 
       // Device ready
       newDevice.on('registered', () => {
-        console.log('Twilio Device registered');
+        console.warn('Twilio Device registered');
         setDeviceStatus('ready');
       });
 
@@ -88,7 +93,7 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
 
       // Token about to expire - refresh it
       newDevice.on('tokenWillExpire', async () => {
-        console.log('Token will expire, refreshing...');
+        console.warn('Token will expire, refreshing...');
         try {
           const newToken = await fetchTwilioToken();
           newDevice.updateToken(newToken);
@@ -101,7 +106,7 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
 
       // Incoming call (we don't handle these, but log for debugging)
       newDevice.on('incoming', (call) => {
-        console.log('Incoming call (rejecting):', call);
+        console.warn('Incoming call (rejecting):', call);
         call.reject();
       });
 
@@ -118,6 +123,19 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
       setDeviceStatus('offline');
     }
   }, [device, fetchTwilioToken, showToast]);
+
+  // Cleanup after call ends
+  const cleanup = useCallback(() => {
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+    callStartTimeRef.current = null;
+    setActiveCall(null);
+    setIsMuted(false);
+    setCallDuration(0);
+    setDeviceStatus('ready');
+  }, []);
 
   // Make an outbound call
   const makeCall = useCallback(async (phoneNumber: string, callRecordId: string) => {
@@ -144,13 +162,13 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
 
       // Call ringing
       call.on('ringing', () => {
-        console.log('Call ringing');
+        console.warn('Call ringing');
         setCallStatus('ringing');
       });
 
       // Call accepted/connected
       call.on('accept', () => {
-        console.log('Call accepted');
+        console.warn('Call accepted');
         setCallStatus('in-progress');
         callStartTimeRef.current = Date.now();
 
@@ -164,27 +182,27 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
 
       // Call reconnecting
       call.on('reconnecting', (error) => {
-        console.log('Call reconnecting:', error);
+        console.warn('Call reconnecting:', error);
         setCallStatus('reconnecting');
         showToast('Connection unstable, reconnecting...', 'error');
       });
 
       // Call reconnected
       call.on('reconnected', () => {
-        console.log('Call reconnected');
+        console.warn('Call reconnected');
         setCallStatus('in-progress');
       });
 
       // Call disconnected
       call.on('disconnect', () => {
-        console.log('Call disconnected');
+        console.warn('Call disconnected');
         setCallStatus('completed');
         cleanup();
       });
 
       // Call cancelled
       call.on('cancel', () => {
-        console.log('Call cancelled');
+        console.warn('Call cancelled');
         setCallStatus('failed');
         cleanup();
       });
@@ -208,7 +226,7 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
       setCallStatus('failed');
       setDeviceStatus('ready');
     }
-  }, [device, deviceStatus, showToast]);
+  }, [device, deviceStatus, showToast, cleanup]);
 
   // Hang up current call
   const hangUp = useCallback(() => {
@@ -225,19 +243,6 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
       setIsMuted(newMuteState);
     }
   }, [activeCall, isMuted]);
-
-  // Cleanup after call ends
-  const cleanup = useCallback(() => {
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = null;
-    }
-    callStartTimeRef.current = null;
-    setActiveCall(null);
-    setIsMuted(false);
-    setCallDuration(0);
-    setDeviceStatus('ready');
-  }, []);
 
   // Cleanup on unmount
   useEffect(() => {

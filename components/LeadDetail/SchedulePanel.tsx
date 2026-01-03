@@ -7,7 +7,7 @@ interface SchedulePanelProps {
 }
 
 const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSchedule }) => {
-  const [schedulingDate, setSchedulingDate] = useState(
+  const [schedulingDate] = useState(
     initialDate ? initialDate.substring(0, 16) : ''
   );
   const [note, setNote] = useState('');
@@ -26,10 +26,10 @@ const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSched
   };
 
   return (
-    <section className="bg-white border border-slate-200 rounded-[3rem] p-10 shadow-sm space-y-8">
+    <section className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm space-y-6">
       <div className="flex items-center gap-3 mb-2">
-        <Calendar className="text-indigo-600" size={24} />
-        <h3 className="text-2xl font-black text-slate-900 tracking-tight">
+        <Calendar className="text-blue-600" size={20} />
+        <h3 className="text-lg font-bold text-slate-900">
           Set Manual Task
         </h3>
       </div>
@@ -47,7 +47,7 @@ const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSched
             onClick={() => onSchedule(24, undefined, note)}
           />
           <SchedulePreset
-            icon={<CheckCircle2 size={16} className="text-indigo-500" />}
+            icon={<CheckCircle2 size={16} className="text-blue-500" />}
             label="End of Day"
             onClick={setEndOfDay}
           />
@@ -60,21 +60,21 @@ const SchedulePanel: React.FC<SchedulePanelProps> = memo(({ initialDate, onSched
       </div>
 
       <div className="space-y-3">
-        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 block">
+        <label className="text-[10px] font-medium text-slate-400 uppercase tracking-widest ml-1 block">
           Add Note (Optional)
         </label>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="E.g., Follow up on the pricing proposal..."
-          className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-medium text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all h-24 resize-none"
+          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-md font-medium text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all h-24 resize-none"
         />
       </div>
 
       <button
         onClick={() => onSchedule(null, schedulingDate, note)}
         disabled={!schedulingDate}
-        className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 disabled:bg-slate-200 shadow-xl shadow-indigo-100 transition-all"
+        className="w-full py-3 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 disabled:bg-slate-200 transition-all"
       >
         Set Appointment
       </button>
@@ -92,12 +92,12 @@ const SchedulePreset: React.FC<{
 }> = ({ icon, label, onClick }) => (
   <button
     onClick={onClick}
-    className="p-4 md:p-6 bg-slate-50 border border-slate-100 rounded-3xl text-center hover:bg-indigo-50 hover:border-indigo-200 transition-all group flex flex-col items-center justify-center gap-3"
+    className="p-4 md:p-5 bg-slate-50 border border-slate-100 rounded-lg text-center hover:bg-blue-50 hover:border-blue-200 transition-all group flex flex-col items-center justify-center gap-2"
   >
-    <div className="text-slate-400 group-hover:text-indigo-600 transition-colors">
+    <div className="text-slate-400 group-hover:text-blue-600 transition-colors">
       {icon}
     </div>
-    <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest group-hover:text-indigo-700">
+    <span className="text-[10px] font-medium text-slate-600 uppercase tracking-widest group-hover:text-blue-700">
       {label}
     </span>
   </button>

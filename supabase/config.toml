@@ -8,3 +8,12 @@ verify_jwt = false
 [functions.scrape-callback]
 # Callback from Modal webhook - uses secret-based auth instead of JWT
 verify_jwt = false
+
+[functions.gmail-oauth-callback]
+# JWT verification handled manually in function code (getUser validation)
+# Gateway JWT check disabled to avoid token timing issues with OAuth popup flow
+verify_jwt = false
+
+[functions.send-email]
+# JWT verification handled manually in function code (getUser validation)
+verify_jwt = false

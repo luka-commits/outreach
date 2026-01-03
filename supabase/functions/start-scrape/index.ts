@@ -1,22 +1,28 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
+import { checkRateLimit, rateLimitResponse } from "../_shared/rateLimit.ts"
 
 // CORS configuration - restrict to allowed origins in production
-const getAllowedOrigin = (req: Request): string => {
+const getAllowedOrigin = (req: Request): string | null => {
   const origin = req.headers.get('Origin') || '';
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
+  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map((o: string) => o.trim()).filter((o: string) => o.length > 0);
 
-  // In development or if no origins configured, allow the request origin
-  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
-    return origin || '*';
+  // If ALLOWED_ORIGINS is configured, strictly enforce it
+  if (allowedOrigins.length > 0) {
+    if (allowedOrigins.includes(origin)) {
+      return origin;
+    }
+    // Origin not in allowed list - reject
+    return null;
   }
 
-  // Default to first allowed origin if request origin not in list
-  return allowedOrigins[0];
+  // In development (no ALLOWED_ORIGINS configured), allow the request origin
+  // but never return '*' for security
+  return origin || null;
 };
 
-const getCorsHeaders = (req: Request) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(req),
+const getCorsHeaders = (origin: string) => ({
+  'Access-Control-Allow-Origin': origin,
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 });
 
@@ -29,7 +35,16 @@ interface StartScrapeRequest {
 }
 
 serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
+  // Validate origin first
+  const allowedOrigin = getAllowedOrigin(req);
+  if (!allowedOrigin) {
+    return new Response(JSON.stringify({ error: 'Origin not allowed' }), {
+      headers: { 'Content-Type': 'application/json' },
+      status: 403,
+    });
+  }
+
+  const corsHeaders = getCorsHeaders(allowedOrigin);
 
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -72,6 +87,12 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 401,
       });
+    }
+
+    // Rate limit: 10 scrape jobs per minute per user
+    const rateLimit = checkRateLimit(user.id, 'start-scrape', 10, 60000);
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit.resetAt);
     }
 
     // 4. Parse request body
@@ -236,8 +257,9 @@ serve(async (req) => {
     });
 
   } catch (error) {
+    // Log error internally but don't expose details to client
     console.error('Start scrape error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     });

@@ -1,4 +1,4 @@
-# CLAUDE.md - OutreachPilot
+# CLAUDE.md - Outbound Pilot
 
 > **IMPORTANT**: Keep this file up-to-date! When making changes to the codebase, update the relevant sections immediately:
 > - **New component** → Add to "Project Structure" and "Component Views" table
@@ -8,9 +8,9 @@
 > - **New feature** → Add to "Recent Feature Updates" checklist
 > - **Bug fix** → Add to "Recent Feature Updates" if significant
 
-## What is OutreachPilot?
+## What is Outbound Pilot?
 
-OutreachPilot is a sales outreach management SPA for tracking leads, scheduling follow-ups, and executing multi-step outreach strategies. It helps sales teams:
+Outbound Pilot is a sales outreach management SPA for tracking leads, scheduling follow-ups, and executing multi-step outreach strategies. It helps sales teams:
 
 - Import and organize leads from CSV or manual entry
 - Create reusable outreach strategies with timed follow-up sequences

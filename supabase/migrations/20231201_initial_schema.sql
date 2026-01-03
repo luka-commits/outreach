@@ -1,5 +1,5 @@
 -- =====================================================
--- OutreachPilot Initial Database Schema
+-- Outbound Pilot Initial Database Schema
 -- This migration creates the core tables and their relationships
 -- =====================================================
 

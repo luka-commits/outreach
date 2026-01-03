@@ -1,7 +1,17 @@
-import React, { Suspense, lazy, useMemo } from 'react';
+import React, { Suspense, lazy } from 'react';
 import { useNavigation } from '../contexts/NavigationContext';
 import { Lead, Activity, Strategy, OutreachGoals } from '../types';
 import LoadingSpinner from './LoadingSpinner';
+
+// Transition wrapper for smooth view changes
+const ViewTransition: React.FC<{ children: React.ReactNode; className?: string }> = ({
+  children,
+  className = ''
+}) => (
+  <div className={`animate-in fade-in duration-200 ${className}`}>
+    {children}
+  </div>
+);
 
 // Lazy load all view components for code splitting
 const Dashboard = lazy(() => import('./Dashboard'));
@@ -14,6 +24,9 @@ const LeadFinder = lazy(() => import('./LeadFinder'));
 const PricingPage = lazy(() => import('./PricingPage'));
 const SettingsView = lazy(() => import('./SettingsView'));
 const CSVUpload = lazy(() => import('./CSVUpload'));
+const DuplicateDetection = lazy(() => import('./DuplicateDetection'));
+const Networking = lazy(() => import('./Networking'));
+const StartHere = lazy(() => import('./StartHere'));
 
 interface ViewRouterProps {
   // Data
@@ -21,6 +34,7 @@ interface ViewRouterProps {
   activities: Activity[];
   strategies: Strategy[];
   goals: OutreachGoals;
+  currentLeadCount: number;
 
   // Computed data
   todaysTasks: Lead[];
@@ -35,7 +49,8 @@ interface ViewRouterProps {
     action: string,
     note?: string,
     isFirstOutreach?: boolean,
-    platform?: Activity['platform']
+    platform?: Activity['platform'],
+    direction?: Activity['direction']
   ) => Promise<void>;
   onUpdateGoals: (goals: OutreachGoals) => void;
   onUpdateStrategies: (strategies: Strategy[]) => void;
@@ -47,6 +62,7 @@ const ViewRouter: React.FC<ViewRouterProps> = ({
   activities,
   strategies,
   goals,
+  currentLeadCount,
   todaysTasks,
   allScheduledLeads,
   onUpdateLead,
@@ -55,86 +71,90 @@ const ViewRouter: React.FC<ViewRouterProps> = ({
   onAddActivity,
   onUpdateGoals,
   onUpdateStrategies,
-  onOpenUpload,
+  onOpenUpload: _onOpenUpload,
 }) => {
   const { currentView, selectedLeadId, navigate, navigateToLead, goBack } = useNavigation();
-  // const [showPricing, setShowPricing] = React.useState(false); // Removed local state
-  // const [showSettings, setShowSettings] = React.useState(false); // Removed local state
   const [showUpload, setShowUpload] = React.useState(false);
-
-  // We don't find the selected lead globally anymore, LeadDetail fetches it by ID
-  // But for simple "Next/Prev" navigation, we might need a list of IDs?
-  // For now, next/prev might break if we don't have the list.
-  // We can fix next/prev later or disable it.
-  // Actually, we can just fetch the LIST of IDs (lightweight) if needed, or remove Next/Prev for now to save performance.
-
-  const navigateLead = (direction: 'next' | 'prev') => {
-    // NOTE: Navigation requires knowledge of the current list order. 
-    // Since we are paginating server-side now, this complex "next/prev" needs to be refactored 
-    // to ask the server for the next ID. Disabling for now to prevent crashes.
-    console.warn("Next/Prev navigation temporarily disabled during optimization refactor.");
-  };
 
   return (
     <Suspense fallback={<LoadingSpinner fullScreen={false} message="Loading view..." />}>
+      {currentView === 'starthere' && (
+        <ViewTransition>
+          <StartHere />
+        </ViewTransition>
+      )}
+
       {currentView === 'dashboard' && (
-        <Dashboard
-          leads={leads}
-          activities={activities}
-          onStartQueue={() => navigate('queue')}
-          onViewLeads={() => navigate('leads')}
-          queueCount={todaysTasks.length}
-          todaysTasks={todaysTasks}
-          goals={goals}
-          onUpdateGoals={onUpdateGoals}
-          onOpenPricing={() => navigate('pricing')}
-          onOpenSettings={() => navigate('profile')}
-        />
+        <ViewTransition>
+          <Dashboard
+            leads={leads}
+            activities={activities}
+            onStartQueue={() => navigate('queue')}
+            onViewLeads={() => navigate('leads')}
+            queueCount={todaysTasks.length}
+            todaysTasks={todaysTasks}
+            goals={goals}
+            onUpdateGoals={onUpdateGoals}
+            onOpenPricing={() => navigate('pricing')}
+            onOpenSettings={() => navigate('profile')}
+          />
+        </ViewTransition>
       )}
 
       {currentView === 'leads' && (
-        <LeadList
-          strategies={strategies}
-          onSelectLead={navigateToLead}
-          onOpenUpload={() => setShowUpload(true)}
-          onUpdateLead={onUpdateLead}
-        />
+        <ViewTransition>
+          <LeadList
+            strategies={strategies}
+            onSelectLead={navigateToLead}
+            onOpenUpload={() => setShowUpload(true)}
+            onUpdateLead={onUpdateLead}
+          />
+        </ViewTransition>
       )}
 
       {currentView === 'finder' && (
-        <LeadFinder onNavigateToSettings={() => navigate('profile')} />
+        <ViewTransition>
+          <LeadFinder onNavigateToSettings={() => navigate('profile')} />
+        </ViewTransition>
       )}
 
       {currentView === 'detail' && selectedLeadId && (
-        <LeadDetail
-          leadId={selectedLeadId}
-          strategies={strategies}
-          onBack={goBack}
-          onUpdate={onUpdateLead}
-          onDelete={onDeleteLead}
-          onAddActivity={onAddActivity}
-          onNavigate={navigateLead}
-        />
+        <ViewTransition>
+          <LeadDetail
+            leadId={selectedLeadId}
+            strategies={strategies}
+            onBack={goBack}
+            onUpdate={onUpdateLead}
+            onDelete={onDeleteLead}
+            onAddActivity={onAddActivity}
+          />
+        </ViewTransition>
       )}
 
       {currentView === 'queue' && (
-        <TaskQueue
-          todayTasks={todaysTasks}
-          allScheduledTasks={allScheduledLeads}
-          strategies={strategies}
-          onBack={goBack}
-          onUpdateLead={onUpdateLead}
-          onAddActivity={onAddActivity}
-          onSelectLead={navigateToLead}
-        />
+        <ViewTransition>
+          <TaskQueue
+            todayTasks={todaysTasks}
+            allScheduledTasks={allScheduledLeads}
+            strategies={strategies}
+            onBack={goBack}
+            onUpdateLead={onUpdateLead}
+            onAddActivity={onAddActivity}
+            onSelectLead={navigateToLead}
+          />
+        </ViewTransition>
       )}
 
       {currentView === 'strategies' && (
-        <StrategyManager strategies={strategies} onUpdate={onUpdateStrategies} />
+        <ViewTransition>
+          <StrategyManager strategies={strategies} onUpdate={onUpdateStrategies} />
+        </ViewTransition>
       )}
 
       {currentView === 'reporting' && (
-        <Reporting leads={leads} activities={activities} strategies={strategies} goals={goals} />
+        <ViewTransition>
+          <Reporting />
+        </ViewTransition>
       )}
 
       {/* Removed old settings view */}
@@ -148,40 +168,40 @@ const ViewRouter: React.FC<ViewRouterProps> = ({
         />
       )} */}
 
-      {/* Settings Overlay */}
       {currentView === 'profile' && (
-        <div className="fixed inset-0 z-[100] bg-white overflow-y-auto">
+        <ViewTransition>
           <SettingsView
             onClose={() => goBack()}
             onOpenPricing={() => navigate('pricing')}
           />
-        </div>
+        </ViewTransition>
       )}
 
       {currentView === 'pricing' && (
-        <div className="fixed inset-0 z-[100] bg-white overflow-y-auto">
+        <div className="fixed inset-0 z-[100] bg-white overflow-y-auto animate-in slide-in-from-right duration-300">
           <PricingPage onBack={() => goBack()} />
         </div>
+      )}
+
+      {currentView === 'duplicates' && (
+        <ViewTransition>
+          <DuplicateDetection />
+        </ViewTransition>
+      )}
+
+      {currentView === 'networking' && (
+        <ViewTransition>
+          <Networking />
+        </ViewTransition>
       )}
 
       {/* Modal Overlay for Upload */}
       {showUpload && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          {/* Note: We pass leads.length. Ideally, we should use the server total count, 
-               but for now, assuming 'leads' might be paginated, we should probably fetch count.
-               However, implementing exact server count just for this check might be overkill for this Step. 
-               Let's assume leads.length is close enough OR fetch it. 
-               Wait, leads is just the current page in LeadList usually, but here in ViewRouter 'leads' prop 
-               is actually empty array `[]` as passed from App.tsx since we did the refactor!
-               
-               CRITICAL: We need the TOTAL count to enforce limit correctly.
-               The 'leads' prop in ViewRouter is now [] (empty) because LeadList fetches its own.
-               We need to fetch the count in CSVUpload or pass it from somewhere.
-           */}
           <CSVUpload
             onUpload={onAddLeads}
             onClose={() => setShowUpload(false)}
-            currentLeadCount={leads.length}
+            currentLeadCount={currentLeadCount}
           />
         </div>
       )}

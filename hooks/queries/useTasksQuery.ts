@@ -7,7 +7,7 @@ import { queryKeys } from '../../lib/queryClient';
  */
 export function useTasksQuery(userId: string | undefined) {
     return useQuery({
-        queryKey: ['tasks', userId],
+        queryKey: queryKeys.tasks(userId),
         queryFn: () => api.getDueTasks(userId!),
         enabled: !!userId,
         // Tasks change frequently, but we can keep them fresh for a bit
@@ -21,7 +21,7 @@ export function useTasksQuery(userId: string | undefined) {
  */
 export function useAllScheduledTasksQuery(userId: string | undefined) {
     return useQuery({
-        queryKey: ['tasks', userId, 'all-scheduled'],
+        queryKey: queryKeys.tasksAllScheduled(userId),
         queryFn: () => api.getAllScheduledTasks(userId!),
         enabled: !!userId,
         staleTime: 1000 * 60 * 5,
@@ -33,7 +33,7 @@ export function useAllScheduledTasksQuery(userId: string | undefined) {
  */
 export function useTaskCountsQuery(userId: string | undefined) {
     return useQuery({
-        queryKey: ['tasks', userId, 'counts'],
+        queryKey: queryKeys.tasksCounts(userId),
         queryFn: () => api.getTaskCounts(userId!),
         enabled: !!userId,
         staleTime: 1000 * 60 * 2, // 2 minutes - counts change more frequently

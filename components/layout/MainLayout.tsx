@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './Sidebar';
 import MobileNav from './MobileNav';
+import { TrialBanner } from '../ui/TrialBanner';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -21,6 +22,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({
     return saved ? JSON.parse(saved) : false;
   });
 
+  // Use ref to avoid dependency on sidebarCollapsed in effect
+  const sidebarCollapsedRef = useRef(sidebarCollapsed);
+  sidebarCollapsedRef.current = sidebarCollapsed;
+
   useEffect(() => {
     const handleStorageChange = () => {
       const saved = localStorage.getItem('op_sidebar_collapsed');
@@ -34,7 +39,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({
     const interval = setInterval(() => {
       const saved = localStorage.getItem('op_sidebar_collapsed');
       const newValue = saved ? JSON.parse(saved) : false;
-      if (newValue !== sidebarCollapsed) {
+      if (newValue !== sidebarCollapsedRef.current) {
         setSidebarCollapsed(newValue);
       }
     }, 100);
@@ -43,7 +48,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({
       window.removeEventListener('storage', handleStorageChange);
       clearInterval(interval);
     };
-  }, [sidebarCollapsed]);
+  }, []);
 
   return (
     <div
@@ -56,6 +61,8 @@ const MainLayout: React.FC<MainLayoutProps> = ({
         onOpenAddLead={onOpenAddLead}
         onOpenUpload={onOpenUpload}
       />
+
+      <TrialBanner />
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 md:p-12">{children}</main>
 

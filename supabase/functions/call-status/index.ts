@@ -1,29 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-
-// CORS configuration
-const getAllowedOrigin = (req: Request): string => {
-  const origin = req.headers.get('Origin') || '';
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
-
-  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
-    return origin || '*';
-  }
-
-  return allowedOrigins[0];
-};
-
-const getCorsHeaders = (req: Request) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(req),
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-});
+import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts"
+import { validateTwilioSignature } from "../_shared/twilioValidation.ts"
+import { safeDecrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
 
 serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
-
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  const preflightResponse = handleCorsPreflightIfNeeded(req);
+  if (preflightResponse) return preflightResponse;
+
+  let corsHeaders: Record<string, string>;
+  try {
+    corsHeaders = getCorsHeaders(req);
+  } catch {
+    corsHeaders = { 'Content-Type': 'application/json' };
   }
 
   try {
@@ -37,22 +27,69 @@ serve(async (req) => {
     const callSid = formData.get('CallSid')?.toString();
     const callStatus = formData.get('CallStatus')?.toString();
     const callDuration = formData.get('CallDuration')?.toString();
-    const caller = formData.get('Caller')?.toString();
-    const to = formData.get('To')?.toString();
-    const accountSid = formData.get('AccountSid')?.toString();
-
-    console.log('Call status callback:', {
-      callSid,
-      callStatus,
-      callDuration,
-      caller,
-      to,
-    });
 
     if (!callSid || !callStatus) {
       return new Response(JSON.stringify({ error: 'Missing required parameters' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
+      });
+    }
+
+    // Find the call record to get user's Twilio credentials for validation
+    const { data: callRecord, error: findError } = await supabaseAdmin
+      .from('call_records')
+      .select('id, user_id')
+      .eq('twilio_call_sid', callSid)
+      .single();
+
+    if (findError || !callRecord) {
+      // Call record not found - return success to prevent Twilio retries
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Get user's Twilio auth token for webhook validation
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('twilio_auth_token')
+      .eq('id', callRecord.user_id)
+      .single();
+
+    if (!profile?.twilio_auth_token) {
+      // No auth token - can't validate, return success to prevent retries
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Decrypt auth token if encryption is configured
+    let authToken: string = profile.twilio_auth_token;
+    if (isEncryptionConfigured()) {
+      const decrypted = await safeDecrypt(profile.twilio_auth_token);
+      if (!decrypted) {
+        // Can't decrypt - return success to prevent Twilio retries
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      authToken = decrypted;
+    }
+
+    // SECURITY: Validate Twilio webhook signature
+    const webhookUrl = `${supabaseUrl}/functions/v1/call-status`;
+    const isValidSignature = await validateTwilioSignature(
+      req,
+      authToken,
+      webhookUrl,
+      formData
+    );
+
+    if (!isValidSignature) {
+      // Invalid signature - could be forged request
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 403,
       });
     }
 
@@ -97,20 +134,14 @@ serve(async (req) => {
       updateData.ended_at = new Date().toISOString();
     }
 
-    // Update call record by Twilio call SID
-    const { data, error } = await supabaseAdmin
+    // Update call record
+    const { error: updateError } = await supabaseAdmin
       .from('call_records')
       .update(updateData)
-      .eq('twilio_call_sid', callSid)
-      .select()
-      .single();
+      .eq('id', callRecord.id);
 
-    if (error) {
-      console.error('Error updating call record:', error);
-      // Don't return error to Twilio - just log it
-    } else {
-      console.log('Updated call record:', data?.id);
-    }
+    // Log errors but don't expose details
+    void updateError;
 
     // Return success to Twilio
     return new Response(JSON.stringify({ success: true }), {
@@ -118,10 +149,16 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error('Error handling call status:', error);
+    console.error('Error handling call status');
+    let corsHeadersFallback: Record<string, string>;
+    try {
+      corsHeadersFallback = getCorsHeaders(req);
+    } catch {
+      corsHeadersFallback = { 'Content-Type': 'application/json' };
+    }
     // Always return success to Twilio to prevent retries
     return new Response(JSON.stringify({ success: true }), {
-      headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' },
+      headers: { ...corsHeadersFallback, 'Content-Type': 'application/json' },
     });
   }
 });

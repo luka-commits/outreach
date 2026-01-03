@@ -1,22 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-
-// CORS configuration
-const getAllowedOrigin = (req: Request): string => {
-  const origin = req.headers.get('Origin') || '';
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
-
-  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
-    return origin || '*';
-  }
-
-  return allowedOrigins[0];
-};
-
-const getCorsHeaders = (req: Request) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(req),
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-});
+import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse } from "../_shared/cors.ts"
+import { safeDecrypt, encrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
+import { isValidEmail, sanitizeMimeHeader } from "../_shared/validation.ts"
+import { checkRateLimit, rateLimitResponse } from "../_shared/rateLimit.ts"
 
 // Helper to base64url encode for Gmail API
 function base64UrlEncode(str: string): string {
@@ -163,11 +150,15 @@ async function sendViaResend(
 }
 
 serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
-
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+  const preflightResponse = handleCorsPreflightIfNeeded(req);
+  if (preflightResponse) return preflightResponse;
+
+  let corsHeaders: Record<string, string>;
+  try {
+    corsHeaders = getCorsHeaders(req);
+  } catch (error) {
+    return createErrorResponse(req, 'CORS not configured', 403);
   }
 
   try {
@@ -202,6 +193,12 @@ serve(async (req) => {
       });
     }
 
+    // Rate limit: 50 emails per minute per user
+    const rateLimit = checkRateLimit(user.id, 'send-email', 50, 60000);
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit.resetAt);
+    }
+
     // 4. Get request body
     const { leadId, subject, bodyHtml } = await req.json();
 
@@ -233,6 +230,17 @@ serve(async (req) => {
         status: 400,
       });
     }
+
+    // SECURITY: Validate email format to prevent injection attacks
+    if (!isValidEmail(lead.email)) {
+      return new Response(JSON.stringify({ error: 'Invalid email address format' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400,
+      });
+    }
+
+    // Sanitize subject to prevent MIME header injection
+    const safeSubject = sanitizeMimeHeader(subject);
 
     // 6. Get user's email settings
     const { data: profile, error: profileError } = await supabaseAdmin
@@ -277,7 +285,25 @@ serve(async (req) => {
         });
       }
 
-      let accessToken = profile.gmail_access_token;
+      // Decrypt tokens if encryption is configured
+      let accessToken: string | null = profile.gmail_access_token;
+      let refreshToken: string | null = profile.gmail_refresh_token;
+
+      if (isEncryptionConfigured()) {
+        accessToken = await safeDecrypt(profile.gmail_access_token);
+        refreshToken = await safeDecrypt(profile.gmail_refresh_token);
+
+        if (!accessToken || !refreshToken) {
+          return new Response(JSON.stringify({
+            error: 'Gmail credentials corrupted. Please reconnect Gmail in Settings.',
+            tokenExpired: true
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 401,
+          });
+        }
+      }
+
       const gmailClientId = Deno.env.get('GMAIL_CLIENT_ID');
 
       // Check if token is expired
@@ -293,7 +319,7 @@ serve(async (req) => {
           });
         }
 
-        const refreshResult = await refreshGmailToken(profile.gmail_refresh_token, gmailClientId);
+        const refreshResult = await refreshGmailToken(refreshToken, gmailClientId);
 
         if (!refreshResult) {
           return new Response(JSON.stringify({
@@ -305,11 +331,16 @@ serve(async (req) => {
           });
         }
 
-        // Update stored token
+        // Re-encrypt and store the new token
+        let tokenToStore = refreshResult.accessToken;
+        if (isEncryptionConfigured()) {
+          tokenToStore = await encrypt(refreshResult.accessToken);
+        }
+
         await supabaseAdmin
           .from('profiles')
           .update({
-            gmail_access_token: refreshResult.accessToken,
+            gmail_access_token: tokenToStore,
             gmail_token_expires_at: refreshResult.expiresAt,
           })
           .eq('id', user.id);
@@ -320,7 +351,7 @@ serve(async (req) => {
       result = await sendViaGmail(
         accessToken,
         lead.email,
-        subject,
+        safeSubject,
         bodyHtml,
         profile.gmail_email
       );
@@ -334,11 +365,26 @@ serve(async (req) => {
         });
       }
 
+      // Decrypt Resend API key if encryption is configured
+      let resendApiKey: string = profile.resend_api_key;
+      if (isEncryptionConfigured()) {
+        const decrypted = await safeDecrypt(profile.resend_api_key);
+        if (!decrypted) {
+          return new Response(JSON.stringify({
+            error: 'Resend credentials corrupted. Please reconfigure in Settings.',
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 400,
+          });
+        }
+        resendApiKey = decrypted;
+      }
+
       result = await sendViaResend(
-        profile.resend_api_key,
+        resendApiKey,
         profile.resend_from_address,
         lead.email,
-        subject,
+        safeSubject,
         bodyHtml
       );
 
@@ -370,12 +416,18 @@ serve(async (req) => {
     }
 
   } catch (error) {
-    console.error('Error in send-email:', error);
+    // Don't log full error details
+    console.error('Error in send-email');
+    let corsHeadersFallback: Record<string, string>;
+    try {
+      corsHeadersFallback = getCorsHeaders(req);
+    } catch {
+      corsHeadersFallback = { 'Content-Type': 'application/json' };
+    }
     return new Response(JSON.stringify({
       error: 'Internal server error',
-      details: error instanceof Error ? error.message : 'Unknown error'
     }), {
-      headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' },
+      headers: { ...corsHeadersFallback, 'Content-Type': 'application/json' },
       status: 500,
     });
   }

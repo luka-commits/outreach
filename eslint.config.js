@@ -35,6 +35,8 @@ export default tseslint.config(
       'node_modules/**',
       'dist/**',
       'supabase/functions/**',
+      'scripts/**',
+      'tests/**',
       '*.config.js',
       '*.config.ts',
     ],

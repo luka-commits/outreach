@@ -27,7 +27,7 @@ export function useActivitiesPaginatedQuery(
   const { startDate, endDate, limit = 1000 } = options;
 
   return useQuery({
-    queryKey: ['activities', userId, 'paginated', { startDate, endDate, limit }],
+    queryKey: queryKeys.activitiesPaginated(userId, { startDate, endDate, limit }),
     queryFn: () => api.getActivitiesPaginated(userId!, { startDate, endDate, limit, offset: 0 }),
     enabled: !!userId,
     select: (response) => response.data, // Just return the activities array
@@ -94,8 +94,14 @@ export function useActivityMutations(userId: string | undefined) {
         queryClient.setQueryData(queryKeys.activities(userId!), context.previousActivities);
       }
     },
-    onSettled: () => {
+    onSettled: (_data, _error, newActivity) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.activities(userId!) });
+      // Also invalidate the lead timeline to update ActivityFeed
+      if (newActivity?.leadId) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.leadTimeline(userId, newActivity.leadId),
+        });
+      }
     },
   });
 

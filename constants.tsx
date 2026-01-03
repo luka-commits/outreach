@@ -8,6 +8,7 @@ export const STRATEGIES: Strategy[] = [
     id: 'call_sequence',
     name: 'Calling Sequence',
     description: 'High-touch phone sequence for direct sales.',
+    color: 'emerald',
     steps: [
       {
         dayOffset: 0,
@@ -30,6 +31,7 @@ export const STRATEGIES: Strategy[] = [
     id: 'customer_dm',
     name: 'Instagram DM Strategy',
     description: 'Instagram DM first, then follow-up next day.',
+    color: 'pink',
     steps: [
       {
         dayOffset: 0,
@@ -47,6 +49,7 @@ export const STRATEGIES: Strategy[] = [
     id: 'linkedin_outreach',
     name: 'LinkedIn Professional',
     description: 'Professional connection and follow-up sequence.',
+    color: 'sky',
     steps: [
       {
         dayOffset: 0,
@@ -64,6 +67,7 @@ export const STRATEGIES: Strategy[] = [
     id: 'startup_pitch',
     name: 'Multi-Channel Pitch',
     description: 'Multi-channel sequence over 5 days.',
+    color: 'indigo',
     steps: [
       {
         dayOffset: 0,

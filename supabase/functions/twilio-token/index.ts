@@ -1,22 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-
-// CORS configuration
-const getAllowedOrigin = (req: Request): string => {
-  const origin = req.headers.get('Origin') || '';
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim());
-
-  if (allowedOrigins.length === 0 || allowedOrigins[0] === '' || allowedOrigins.includes(origin)) {
-    return origin || '*';
-  }
-
-  return allowedOrigins[0];
-};
-
-const getCorsHeaders = (req: Request) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(req),
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-});
+import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse } from "../_shared/cors.ts"
+import { safeDecrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
 
 // Simple JWT generation for Twilio Access Token
 // This is a minimal implementation - Twilio SDK would be better but Deno compatibility is limited
@@ -92,11 +77,15 @@ async function signToken(signatureInput: string, secret: string): Promise<string
 }
 
 serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
-
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  const preflightResponse = handleCorsPreflightIfNeeded(req);
+  if (preflightResponse) return preflightResponse;
+
+  let corsHeaders: Record<string, string>;
+  try {
+    corsHeaders = getCorsHeaders(req);
+  } catch (error) {
+    return createErrorResponse(req, 'CORS not configured', 403);
   }
 
   try {
@@ -158,8 +147,20 @@ serve(async (req) => {
     // Auth Token can be used for testing but API Keys are more secure
 
     const accountSid = profile.twilio_account_sid;
-    const authToken = profile.twilio_auth_token;
     const twimlAppSid = profile.twilio_twiml_app_sid;
+
+    // Decrypt auth token if encryption is configured
+    let authToken: string = profile.twilio_auth_token;
+    if (isEncryptionConfigured()) {
+      const decrypted = await safeDecrypt(profile.twilio_auth_token);
+      if (!decrypted) {
+        return new Response(JSON.stringify({ error: 'Twilio credentials corrupted. Please reconfigure in Settings.' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400,
+        });
+      }
+      authToken = decrypted;
+    }
 
     // Use account SID as API Key SID for simplicity (works with Auth Token)
     // In production, create proper API Keys
@@ -205,12 +206,17 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error('Error generating Twilio token:', error);
+    console.error('Error generating Twilio token');
+    let corsHeadersFallback: Record<string, string>;
+    try {
+      corsHeadersFallback = getCorsHeaders(req);
+    } catch {
+      corsHeadersFallback = { 'Content-Type': 'application/json' };
+    }
     return new Response(JSON.stringify({
       error: 'Failed to generate token',
-      details: error instanceof Error ? error.message : 'Unknown error'
     }), {
-      headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' },
+      headers: { ...corsHeadersFallback, 'Content-Type': 'application/json' },
       status: 500,
     });
   }

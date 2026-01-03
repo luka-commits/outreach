@@ -1,8 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Mail, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useUpdateGmailCredentials } from '../hooks/queries/useEmailSettingsQuery';
-import { getSession } from '../services/supabase';
+import { supabase } from '../services/supabase';
 
 // Gmail OAuth Configuration
 const GMAIL_CLIENT_ID = import.meta.env.VITE_GMAIL_CLIENT_ID;
@@ -42,6 +42,82 @@ const GmailOAuthButton: React.FC<GmailOAuthButtonProps> = ({ onSuccess, onError 
   const updateGmailCredentials = useUpdateGmailCredentials();
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
+  }, []);
+
+  const exchangeCodeForTokens = useCallback(async (code: string, codeVerifier: string) => {
+    try {
+      // Try to get fresh session - first try refresh, then fall back to getSession
+      let session = null;
+
+      // First try refreshSession to get a completely fresh token
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+
+      if (!refreshError && refreshData.session) {
+        session = refreshData.session;
+      } else {
+        // Fall back to getSession
+        const { data: sessionData } = await supabase.auth.getSession();
+        session = sessionData.session;
+      }
+
+      if (!session) {
+        throw new Error('Session expired. Please sign in again.');
+      }
+
+      // Check if token is expired
+      const now = Math.floor(Date.now() / 1000);
+      const expiresAt = session.expires_at || 0;
+
+      if (expiresAt < now) {
+        throw new Error('Session expired. Please sign in again.');
+      }
+
+      const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/gmail-oauth-callback`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': supabaseAnonKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code,
+          codeVerifier,
+          redirectUri: GMAIL_REDIRECT_URI,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to exchange code for tokens');
+      }
+
+      // SECURITY: Tokens are stored server-side only
+      // We only receive the email back from the edge function
+      // Invalidate queries to refetch the updated profile
+      await updateGmailCredentials.mutateAsync({
+        email: result.email,
+      });
+
+      onSuccess?.(result.email);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to complete authentication';
+      setError(errorMsg);
+      onError?.(errorMsg);
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [updateGmailCredentials, onSuccess, onError]);
 
   const handleConnect = useCallback(async () => {
     if (!GMAIL_CLIENT_ID) {
@@ -91,12 +167,12 @@ const GmailOAuthButton: React.FC<GmailOAuthButtonProps> = ({ onSuccess, onError 
         throw new Error('Popup blocked. Please allow popups for this site.');
       }
 
-      // Poll for popup close and handle callback
-      const pollInterval = setInterval(async () => {
+      // Poll for popup close and handle callback (stored in ref for cleanup)
+      pollIntervalRef.current = setInterval(async () => {
         try {
           // Check if popup was closed
           if (popup.closed) {
-            clearInterval(pollInterval);
+            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
 
             // Check if we got the auth code
             const authCode = sessionStorage.getItem('gmail_auth_code');
@@ -126,53 +202,7 @@ const GmailOAuthButton: React.FC<GmailOAuthButtonProps> = ({ onSuccess, onError 
       onError?.(errorMsg);
       setIsConnecting(false);
     }
-  }, [onError]);
-
-  const exchangeCodeForTokens = async (code: string, codeVerifier: string) => {
-    try {
-      const session = await getSession();
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
-
-      const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-      const response = await fetch(`${supabaseUrl}/functions/v1/gmail-oauth-callback`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          code,
-          codeVerifier,
-          redirectUri: GMAIL_REDIRECT_URI,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to exchange code for tokens');
-      }
-
-      // Credentials are now stored in the database by the Edge Function
-      // Invalidate the query to refetch
-      await updateGmailCredentials.mutateAsync({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        expiresAt: result.expiresAt,
-        email: result.email,
-      });
-
-      onSuccess?.(result.email);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to complete authentication';
-      setError(errorMsg);
-      onError?.(errorMsg);
-    } finally {
-      setIsConnecting(false);
-    }
-  };
+  }, [onError, exchangeCodeForTokens]);
 
   // Listen for OAuth callback from popup
   React.useEffect(() => {
@@ -214,14 +244,14 @@ const GmailOAuthButton: React.FC<GmailOAuthButtonProps> = ({ onSuccess, onError 
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [onError, onSuccess]);
+  }, [onError, exchangeCodeForTokens]);
 
   return (
     <div className="space-y-3">
       <button
         onClick={handleConnect}
         disabled={isConnecting || !user}
-        className="w-full py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700
+        className="w-full py-3 bg-purple-600 text-white font-medium rounded-md hover:bg-purple-700
                    disabled:opacity-50 disabled:cursor-not-allowed transition-colors
                    flex items-center justify-center gap-2"
       >
@@ -239,7 +269,7 @@ const GmailOAuthButton: React.FC<GmailOAuthButtonProps> = ({ onSuccess, onError 
       </button>
 
       {error && (
-        <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 px-3 py-2 rounded-lg">
+        <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 px-3 py-2 rounded-md">
           <AlertCircle size={16} />
           {error}
         </div>
@@ -247,6 +277,13 @@ const GmailOAuthButton: React.FC<GmailOAuthButtonProps> = ({ onSuccess, onError 
 
       <p className="text-xs text-slate-500 text-center">
         Emails will be sent from your Gmail account and appear in your Sent folder.
+      </p>
+      <p className="text-xs text-amber-600 text-center">
+        Note: Gmail integration requires approval. Contact{' '}
+        <a href="mailto:luka@flouence.com" className="underline hover:text-amber-700">
+          luka@flouence.com
+        </a>{' '}
+        to get access enabled for your account.
       </p>
     </div>
   );
