@@ -14,10 +14,22 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Get the current session (for auth headers in Edge Function calls)
+/**
+ * Get the current session with automatic token refresh.
+ * Uses the pattern from GmailOAuthButton - try refresh first, fallback to cached.
+ * This prevents 401 errors when tokens expire during long sessions.
+ */
 export async function getSession() {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session;
+  // First try refreshSession to get a fresh token (handles expired tokens)
+  const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+
+  if (!refreshError && refreshData.session) {
+    return refreshData.session;
+  }
+
+  // Fall back to getSession (may return cached/stale token)
+  const { data: sessionData } = await supabase.auth.getSession();
+  return sessionData.session;
 }
 
 // Database row types (snake_case from Supabase)
@@ -1355,7 +1367,7 @@ export async function updateTwilioCredentials(
   _userId: string,
   creds: TwilioCredentials
 ): Promise<void> {
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSession();
   if (!session?.access_token) {
     throw new Error('Not authenticated');
   }
@@ -1778,7 +1790,7 @@ export async function updateResendCredentials(
   _userId: string,
   creds: ResendCredentials
 ): Promise<void> {
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSession();
   if (!session?.access_token) {
     throw new Error('Not authenticated');
   }
