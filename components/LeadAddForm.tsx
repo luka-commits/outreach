@@ -32,6 +32,13 @@ const LeadAddForm: React.FC<LeadAddFormProps> = ({ onClose, onAdd, currentLeadCo
   const [showStrategyDropdown, setShowStrategyDropdown] = useState(false);
   const strategyDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Refetch strategies when modal opens to ensure fresh data
+  useEffect(() => {
+    if (user?.id) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.strategies(user.id) });
+    }
+  }, [user?.id, queryClient]);
+
   // Close strategy dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
