@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
-import { X, UserPlus, Building, Mail, Phone, Globe, Instagram, Facebook, Linkedin, MapPin, Loader2, CheckCircle2, Link2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, UserPlus, Building, Mail, Phone, Globe, Instagram, Facebook, Linkedin, MapPin, Loader2, CheckCircle2, Link2, ChevronDown, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Lead, ScrapeUrlResponse } from '../types';
 import { useSubscription } from '../hooks/useSubscription';
 import { useAuth } from '../hooks/useAuth';
 import { useUrlScrapeUsageQuery } from '../hooks/queries/useUrlScrapeUsageQuery';
+import { useStrategiesQuery } from '../hooks/queries/useStrategiesQuery';
 import { getSession } from '../services/supabase';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { queryKeys } from '../lib/queryClient';
+import { getStrategyColor } from '../utils/styles';
 
 interface LeadAddFormProps {
   onClose: () => void;
@@ -20,9 +22,28 @@ const LeadAddForm: React.FC<LeadAddFormProps> = ({ onClose, onAdd, currentLeadCo
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: urlScrapeUsage = 0 } = useUrlScrapeUsageQuery(user?.id);
+  const { data: strategies = [] } = useStrategiesQuery(user?.id);
 
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Strategy selection state
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
+  const [showStrategyDropdown, setShowStrategyDropdown] = useState(false);
+  const strategyDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close strategy dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (strategyDropdownRef.current && !strategyDropdownRef.current.contains(event.target as Node)) {
+        setShowStrategyDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedStrategy = strategies.find(s => s.id === selectedStrategyId) || null;
 
   // URL import state
   const [importUrl, setImportUrl] = useState('');
@@ -139,7 +160,9 @@ const LeadAddForm: React.FC<LeadAddFormProps> = ({ onClose, onAdd, currentLeadCo
       id: crypto.randomUUID(),
       ...formData,
       currentStepIndex: 0,
-      status: 'not_contacted',
+      status: selectedStrategyId ? 'in_progress' : 'not_contacted',
+      strategyId: selectedStrategyId || undefined,
+      nextTaskDate: selectedStrategyId ? new Date().toISOString() : undefined,
       createdAt: new Date().toISOString()
     };
 
@@ -267,6 +290,88 @@ const LeadAddForm: React.FC<LeadAddFormProps> = ({ onClose, onAdd, currentLeadCo
                 className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-md text-slate-700 font-medium placeholder:text-slate-300 focus:ring-4 focus:ring-blue-500/10 focus:bg-white focus:border-blue-400 outline-none transition-all min-h-[100px] resize-none"
               />
             </div>
+          </div>
+
+          {/* Strategy Selection */}
+          <div className="space-y-4">
+            <h4 className="text-[10px] font-medium text-slate-400 uppercase tracking-widest ml-1">Strategy (Optional)</h4>
+            <div className="relative" ref={strategyDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setShowStrategyDropdown(!showStrategyDropdown)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 border border-slate-200 rounded-md text-slate-700 font-medium hover:bg-slate-100 focus:ring-4 focus:ring-blue-500/10 focus:bg-white focus:border-blue-400 outline-none transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  {selectedStrategy ? (
+                    <>
+                      <div className={`w-3 h-3 rounded-full ${getStrategyColor(selectedStrategy.color).solid}`} />
+                      <span>{selectedStrategy.name}</span>
+                      <span className="text-xs text-slate-400">({selectedStrategy.steps.length} steps)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap size={18} className="text-slate-300" />
+                      <span className="text-slate-400">Assign later</span>
+                    </>
+                  )}
+                </div>
+                <ChevronDown size={18} className={`text-slate-400 transition-transform ${showStrategyDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showStrategyDropdown && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 max-h-[200px] overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedStrategyId(null);
+                      setShowStrategyDropdown(false);
+                    }}
+                    className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                      !selectedStrategyId
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <p className="font-medium">Assign later</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Create lead without a strategy</p>
+                  </button>
+                  {strategies.map((s) => {
+                    const colorStyles = getStrategyColor(s.color);
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedStrategyId(s.id);
+                          setShowStrategyDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                          selectedStrategyId === s.id
+                            ? 'bg-blue-50 text-blue-600'
+                            : 'text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2.5 h-2.5 rounded-full ${colorStyles.solid}`} />
+                          <span className="font-medium">{s.name}</span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5 ml-[18px]">
+                          {s.steps.length} steps • {s.description || 'No description'}
+                        </p>
+                      </button>
+                    );
+                  })}
+                  {strategies.length === 0 && (
+                    <p className="px-4 py-2.5 text-sm text-slate-400">No strategies created yet</p>
+                  )}
+                </div>
+              )}
+            </div>
+            {selectedStrategy && (
+              <p className="text-xs text-slate-500 ml-1">
+                Lead will start with status "In Progress" and first task scheduled for today.
+              </p>
+            )}
           </div>
 
           <div className="pt-8 border-t border-slate-100 flex gap-4">
