@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { LogOut, ExternalLink, Camera, Check, X, Pencil } from 'lucide-react';
+import { LogOut, ExternalLink, Camera, Check, X, Pencil, AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { radius, shadows } from '../../lib/designTokens';
 import { useAuth } from '../../hooks/useAuth';
 import { useSubscription } from '../../hooks/useSubscription';
-import { useUserPublicProfileQuery, useUserPublicProfileMutations } from '../../hooks/queries/useNetworkingQuery';
+import { useUserPublicProfileQuery, useUserPublicProfileMutations, useResetUserActivityMetrics } from '../../hooks/queries/useNetworkingQuery';
 import { supabase } from '../../services/supabase';
 import { useToast } from '../Toast';
+import ConfirmModal from '../ConfirmModal';
 
 interface AccountTabProps {
   onOpenPricing: () => void;
@@ -27,12 +28,20 @@ const AccountTab: React.FC<AccountTabProps> = ({ onOpenPricing }) => {
     () => showToast('Profile updated!', 'success')
   );
 
+  // Reset activity metrics mutation
+  const resetMetrics = useResetUserActivityMetrics(
+    user?.id,
+    () => showToast('Activity data reset successfully!', 'success'),
+    (message) => showToast(message, 'error')
+  );
+
   // Form state
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync form state with profile data
@@ -308,6 +317,51 @@ const AccountTab: React.FC<AccountTabProps> = ({ onOpenPricing }) => {
           Sign Out
         </button>
       </div>
+
+      {/* Danger Zone Section */}
+      <div className={`bg-white ${radius.md} p-6 ${shadows.sm} border border-red-200`}>
+        <h3 className="text-sm font-medium text-red-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+          <AlertTriangle size={16} />
+          Danger Zone
+        </h3>
+
+        <div className="bg-red-50/50 rounded-lg p-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <p className="font-semibold text-slate-900">Reset All Activity Data</p>
+              <p className="text-slate-500 text-sm">
+                Permanently delete all your outreach history and reset statistics to zero.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowResetConfirm(true)}
+              disabled={resetMetrics.isPending}
+              className="px-4 py-2 bg-white border border-red-300 text-red-600 font-medium rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+            >
+              {resetMetrics.isPending ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Resetting...
+                </>
+              ) : (
+                'Reset Data'
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Reset Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showResetConfirm}
+        onClose={() => setShowResetConfirm(false)}
+        onConfirm={() => resetMetrics.mutate()}
+        title="Reset Activity Data?"
+        message="This will permanently delete all your outreach activities and reset your statistics to zero. This action cannot be undone."
+        confirmLabel="Reset Everything"
+        cancelLabel="Cancel"
+        variant="danger"
+      />
     </div>
   );
 };

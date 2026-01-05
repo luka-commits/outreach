@@ -103,6 +103,37 @@ export function useRefreshUserActivityMetrics(
   });
 }
 
+/**
+ * Mutation hook for resetting user's activity metrics.
+ * Deletes all activities and resets cached metrics to zero.
+ */
+export function useResetUserActivityMetrics(
+  userId: string | undefined,
+  onSuccess?: () => void,
+  onError?: (message: string) => void
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.resetUserActivityMetrics(userId!),
+    onSuccess: () => {
+      // Invalidate all activity-related queries
+      if (userId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.activities(userId) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.userActivityMetrics(userId) });
+        // Use prefix match to invalidate all leaderboard periods and ranks
+        queryClient.invalidateQueries({ queryKey: ['networking', userId, 'leaderboard'], exact: false });
+        queryClient.invalidateQueries({ queryKey: ['networking', userId, 'rank'], exact: false });
+      }
+      onSuccess?.();
+    },
+    onError: (error) => {
+      const message = getErrorMessage(error);
+      onError?.(message);
+    },
+  });
+}
+
 // ============================================
 // Leaderboard Hooks
 // ============================================

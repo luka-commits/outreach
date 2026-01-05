@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useCallback } from 'react';
-import { Plus, Trash2, Edit3, Save, Zap, ChevronUp, ChevronDown, Users, MessageCircle, TrendingUp, Lock, Puzzle } from 'lucide-react';
+import { Plus, Trash2, Edit3, Save, Zap, ChevronUp, ChevronDown, ChevronRight, Users, MessageCircle, TrendingUp, Lock, Puzzle, Reply, Clock } from 'lucide-react';
 import { Strategy, StrategyStep, TaskAction, StrategyPerformance, StrategyColor } from '../types';
 import { ACTION_ICONS } from '../constants';
 import { channelColors, strategyColors } from '../lib/designTokens';
@@ -17,7 +17,10 @@ import { useCustomFieldDefinitionsQuery } from '../hooks/queries/useCustomFields
 
 interface StrategyManagerProps {
   strategies: Strategy[];
-  onUpdate: (strategies: Strategy[]) => void;
+  onAddStrategy: (strategy: Strategy) => Promise<void>;
+  onUpdateStrategy: (strategy: Strategy) => Promise<void>;
+  onDeleteStrategy: (id: string) => Promise<void>;
+  onReorderStrategies: (updates: Array<{ id: string; position: number }>) => Promise<void>;
   loading?: boolean;
 }
 
@@ -245,11 +248,13 @@ const StrategySkeleton: React.FC = () => (
   </div>
 );
 
-const StrategyManager: React.FC<StrategyManagerProps> = ({ strategies, onUpdate, loading }) => {
+const StrategyManager: React.FC<StrategyManagerProps> = ({ strategies, onAddStrategy, onUpdateStrategy, onDeleteStrategy, onReorderStrategies, loading }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Strategy | null>(null);
   const [selectedStepIndex, setSelectedStepIndex] = useState(0);
   const [showVariablePanel, setShowVariablePanel] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const templateTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { user } = useAuth();
@@ -274,7 +279,7 @@ const StrategyManager: React.FC<StrategyManagerProps> = ({ strategies, onUpdate,
     setSelectedStepIndex(0);
   };
 
-  const addNew = () => {
+  const addNew = async () => {
     // Check strategy limit for free users
     if (!canAddStrategy) {
       showToast(
@@ -291,18 +296,34 @@ const StrategyManager: React.FC<StrategyManagerProps> = ({ strategies, onUpdate,
       steps: [{ dayOffset: 0, action: 'send_dm', template: 'Hello {companyName}, ...' }],
       color: 'indigo'
     };
-    const updated = [newS, ...strategies];
-    onUpdate(updated);
-    startEdit(newS);
+
+    try {
+      setIsSaving(true);
+      await onAddStrategy(newS);
+      showToast('Strategy created', 'success');
+      startEdit(newS);
+    } catch (error) {
+      showToast('Failed to create strategy', 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const save = () => {
+  const save = async () => {
     if (!editForm) return;
-    const updated = strategies.map(s => s.id === editForm.id ? editForm : s);
-    onUpdate(updated);
-    setEditingId(null);
-    setEditForm(null);
-    setSelectedStepIndex(0);
+
+    try {
+      setIsSaving(true);
+      await onUpdateStrategy(editForm);
+      showToast('Strategy saved', 'success');
+      setEditingId(null);
+      setEditForm(null);
+      setSelectedStepIndex(0);
+    } catch (error) {
+      showToast('Failed to save strategy', 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const cancel = () => {
@@ -311,20 +332,59 @@ const StrategyManager: React.FC<StrategyManagerProps> = ({ strategies, onUpdate,
     setSelectedStepIndex(0);
   };
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (confirm('Are you sure you want to delete this strategy?')) {
-      onUpdate(strategies.filter(s => s.id !== id));
+      try {
+        setIsSaving(true);
+        await onDeleteStrategy(id);
+        showToast('Strategy deleted', 'success');
+      } catch (error) {
+        showToast('Failed to delete strategy', 'error');
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
-  const updateStep = (idx: number, field: keyof StrategyStep, value: StrategyStep[keyof StrategyStep]) => {
-    if (!editForm) return;
-    const steps = [...editForm.steps];
-    const existingStep = steps[idx];
-    if (!existingStep) return;
-    steps[idx] = { ...existingStep, [field]: value };
-    setEditForm({ ...editForm, steps });
+  const toggleExpanded = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
+
+  const moveStrategy = async (index: number, direction: 'up' | 'down') => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= strategies.length) return;
+
+    // Swap positions
+    const updates = [
+      { id: strategies[index]!.id, position: strategies[newIndex]!.position ?? newIndex },
+      { id: strategies[newIndex]!.id, position: strategies[index]!.position ?? index },
+    ];
+
+    try {
+      await onReorderStrategies(updates);
+    } catch (error) {
+      showToast('Failed to reorder strategies', 'error');
+    }
+  };
+
+  const updateStep = useCallback((idx: number, field: keyof StrategyStep, value: StrategyStep[keyof StrategyStep]) => {
+    setEditForm(prev => {
+      if (!prev) return prev;
+      const steps = [...prev.steps];
+      const existingStep = steps[idx];
+      if (!existingStep) return prev;
+      steps[idx] = { ...existingStep, [field]: value };
+      return { ...prev, steps };
+    });
+  }, []);
 
   const addStep = () => {
     if (!editForm) return;
@@ -460,8 +520,10 @@ const StrategyManager: React.FC<StrategyManagerProps> = ({ strategies, onUpdate,
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
-        {strategies.map(s => (
+      <div className="grid grid-cols-1 gap-2">
+        {strategies.map((s, index) => {
+          const isExpanded = expandedIds.has(s.id);
+          return (
           <div key={s.id} className="bg-white border border-slate-200 rounded-lg overflow-hidden transition-all shadow-sm hover:shadow-md">
             {editingId === s.id && editForm ? (
               // Edit Mode
@@ -508,6 +570,222 @@ const StrategyManager: React.FC<StrategyManagerProps> = ({ strategies, onUpdate,
                       );
                     })}
                   </div>
+                </div>
+
+                {/* Reply Sequence Configuration */}
+                <div className="bg-emerald-50/50 border border-emerald-200/50 rounded-xl p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
+                        <Reply size={16} className="text-emerald-600" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-800">Reply Sequence</h4>
+                        <p className="text-xs text-slate-500">Multi-step follow-up when lead replies</p>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={(editForm.replySequence && editForm.replySequence.length > 0) || false}
+                        onChange={(e) => {
+                          const enabled = e.target.checked;
+                          setEditForm({
+                            ...editForm,
+                            replySequence: enabled
+                              ? [{ dayOffset: 0, action: 'send_dm', template: 'Thanks for getting back to me! I wanted to follow up on...' }]
+                              : undefined
+                          });
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300/30 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                  </div>
+
+                  {editForm.replySequence && editForm.replySequence.length > 0 && (
+                    <div className="space-y-4 pt-2 border-t border-emerald-200/50">
+                      <p className="text-xs text-slate-500">
+                        When a lead replies, this sequence starts. All tasks use the same channel the lead replied from.
+                        Day 0 = immediate, Day 1 = next day, etc.
+                      </p>
+
+                      {/* Reply Sequence Steps */}
+                      <div className="space-y-3">
+                        {editForm.replySequence.map((step, idx) => (
+                          <div key={idx} className="bg-white rounded-lg border border-emerald-100 p-3 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 bg-emerald-100 rounded-md flex items-center justify-center text-xs font-bold text-emerald-600">
+                                  {idx + 1}
+                                </div>
+                                <span className="text-sm font-medium text-slate-700">
+                                  {idx === 0 && step.dayOffset === 0 ? 'Immediate' : `Day ${step.dayOffset}`}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                {editForm.replySequence && editForm.replySequence.length > 1 && (
+                                  <IconButton
+                                    icon={<Trash2 size={14} />}
+                                    aria-label="Remove step"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      const newSteps = editForm.replySequence?.filter((_, i) => i !== idx) || [];
+                                      setEditForm({ ...editForm, replySequence: newSteps });
+                                    }}
+                                    className="text-rose-400 hover:text-rose-600 hover:bg-rose-50"
+                                  />
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <label className="text-xs text-slate-500">Day</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={step.dayOffset}
+                                  onChange={(e) => {
+                                    const newSteps = [...(editForm.replySequence || [])];
+                                    const currentStep = newSteps[idx];
+                                    if (currentStep) {
+                                      newSteps[idx] = { ...currentStep, dayOffset: parseInt(e.target.value) || 0 };
+                                      setEditForm({ ...editForm, replySequence: newSteps });
+                                    }
+                                  }}
+                                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-md text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 outline-none"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-xs text-slate-500">Channel (from reply)</label>
+                                <div className="p-2 bg-slate-100 border border-slate-200 rounded-md text-sm text-slate-500 flex items-center gap-1.5">
+                                  <Reply size={12} />
+                                  Same as reply
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-xs text-slate-500">Template</label>
+                              <textarea
+                                value={step.template}
+                                onChange={(e) => {
+                                  const newSteps = [...(editForm.replySequence || [])];
+                                  const currentStep = newSteps[idx];
+                                  if (currentStep) {
+                                    newSteps[idx] = { ...currentStep, template: e.target.value };
+                                    setEditForm({ ...editForm, replySequence: newSteps });
+                                  }
+                                }}
+                                placeholder="Follow-up message..."
+                                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-md text-sm min-h-[60px] resize-y focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 outline-none"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Add Step Button */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const lastStep = editForm.replySequence?.[editForm.replySequence.length - 1];
+                          const newStep: StrategyStep = {
+                            dayOffset: (lastStep?.dayOffset || 0) + 2,
+                            action: 'send_dm', // Will be overridden by reply channel
+                            template: ''
+                          };
+                          setEditForm({
+                            ...editForm,
+                            replySequence: [...(editForm.replySequence || []), newStep]
+                          });
+                        }}
+                        icon={<Plus size={14} />}
+                        className="w-full justify-center border border-dashed border-emerald-300 text-emerald-600 hover:bg-emerald-50"
+                      >
+                        Add Follow-Up Step
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* No-Reply Timeout Configuration */}
+                <div className="bg-slate-50/50 border border-slate-200/50 rounded-xl p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center">
+                        <Clock size={16} className="text-slate-600" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-800">No-Reply Timeout</h4>
+                        <p className="text-xs text-slate-500">Auto-archive leads that finish without responding</p>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editForm.noReplyDelayDays !== undefined && editForm.noReplyDelayDays !== null}
+                        onChange={(e) => {
+                          const enabled = e.target.checked;
+                          setEditForm({
+                            ...editForm,
+                            noReplyDelayDays: enabled ? 7 : undefined  // Default 7 days
+                          });
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-slate-300/30 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-600"></div>
+                    </label>
+                  </div>
+
+                  {editForm.noReplyDelayDays !== undefined && editForm.noReplyDelayDays !== null && (
+                    <div className="space-y-2 pt-2 border-t border-slate-200/50">
+                      <label className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+                        <Clock size={12} />
+                        Days After Completion
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <div className="flex gap-1">
+                          {[2, 5, 7, 14].map((days) => (
+                            <button
+                              key={days}
+                              type="button"
+                              onClick={() => setEditForm({
+                                ...editForm,
+                                noReplyDelayDays: days
+                              })}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                editForm.noReplyDelayDays === days
+                                  ? 'bg-slate-600 text-white'
+                                  : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+                              }`}
+                            >
+                              {days} days
+                            </button>
+                          ))}
+                        </div>
+                        <span className="text-xs text-slate-400">or</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="90"
+                          value={editForm.noReplyDelayDays || 7}
+                          onChange={(e) => setEditForm({
+                            ...editForm,
+                            noReplyDelayDays: parseInt(e.target.value) || 7
+                          })}
+                          className="w-16 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-sm text-center focus:ring-2 focus:ring-slate-500/20 focus:border-slate-400 outline-none"
+                        />
+                        <span className="text-xs text-slate-500">days</span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-2">
+                        Leads that complete this strategy without replying will be automatically moved to "No Reply" status after this period.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Timeline Header */}
@@ -642,65 +920,108 @@ const StrategyManager: React.FC<StrategyManagerProps> = ({ strategies, onUpdate,
 
                 {/* Action Buttons */}
                 <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                  <Button variant="ghost" onClick={cancel}>
+                  <Button variant="ghost" onClick={cancel} disabled={isSaving}>
                     Cancel
                   </Button>
-                  <Button onClick={save} icon={<Save size={18} />}>
-                    Save Changes
+                  <Button onClick={save} icon={<Save size={18} />} disabled={isSaving}>
+                    {isSaving ? 'Saving...' : 'Save Changes'}
                   </Button>
                 </div>
               </div>
             ) : (
-              // View Mode
-              <div className="p-6 group">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-4 flex-1 min-w-0">
-                    {/* Strategy color indicator */}
-                    <div className={`w-12 h-12 rounded-xl flex-shrink-0 flex items-center justify-center ${getStrategyColor(s.color).bg}`}>
-                      <div className={`w-5 h-5 rounded-full ${getStrategyColor(s.color).solid}`} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3">
-                        <h3 className="font-bold text-slate-900 truncate">{s.name}</h3>
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-xs font-medium flex-shrink-0">
-                          {s.steps.length} {s.steps.length === 1 ? 'step' : 'steps'}
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-500 mt-0.5 line-clamp-1">{s.description}</p>
+              // View Mode (Collapsed or Expanded)
+              <div className="group">
+                {/* Collapsed Header - Always visible */}
+                <div
+                  className="p-3 flex items-center gap-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                  onClick={() => toggleExpanded(s.id)}
+                >
+                  {/* Expand/Collapse Chevron */}
+                  <ChevronRight
+                    size={18}
+                    className={`text-slate-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+                  />
 
-                      {/* Step Timeline Preview */}
-                      <div className="mt-3">
-                        <StepTimeline steps={s.steps} />
-                      </div>
+                  {/* Color indicator */}
+                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${getStrategyColor(s.color).solid}`} />
 
-                      {/* Performance Metrics */}
-                      <div className="mt-3">
-                        <StrategyMetrics performance={performanceMap.get(s.id)} />
-                      </div>
-                    </div>
-                  </div>
+                  {/* Strategy name */}
+                  <h3 className="font-semibold text-slate-900 truncate flex-1">{s.name}</h3>
 
-                  {/* Action Buttons */}
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  {/* Reorder buttons - visible on hover */}
+                  <div
+                    className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <IconButton
-                      icon={<Edit3 size={18} />}
-                      aria-label="Edit strategy"
+                      icon={<ChevronUp size={16} />}
+                      aria-label="Move up"
                       variant="ghost"
-                      onClick={() => startEdit(s)}
+                      size="sm"
+                      disabled={index === 0}
+                      onClick={() => moveStrategy(index, 'up')}
+                      className="text-slate-400 hover:text-slate-600"
                     />
                     <IconButton
-                      icon={<Trash2 size={18} />}
-                      aria-label="Delete strategy"
+                      icon={<ChevronDown size={16} />}
+                      aria-label="Move down"
                       variant="ghost"
-                      onClick={() => remove(s.id)}
-                      className="text-rose-500 hover:bg-rose-50"
+                      size="sm"
+                      disabled={index === strategies.length - 1}
+                      onClick={() => moveStrategy(index, 'down')}
+                      className="text-slate-400 hover:text-slate-600"
                     />
                   </div>
                 </div>
+
+                {/* Expanded Content */}
+                {isExpanded && (
+                  <div className="px-4 pb-4 pt-1 border-t border-slate-100">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        {/* Step count badge */}
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-xs font-medium">
+                          {s.steps.length} {s.steps.length === 1 ? 'step' : 'steps'}
+                        </span>
+
+                        {/* Description */}
+                        <p className="text-sm text-slate-500 mt-2 line-clamp-2">{s.description}</p>
+
+                        {/* Step Timeline Preview */}
+                        <div className="mt-3">
+                          <StepTimeline steps={s.steps} />
+                        </div>
+
+                        {/* Performance Metrics */}
+                        <div className="mt-3">
+                          <StrategyMetrics performance={performanceMap.get(s.id)} />
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-1 flex-shrink-0">
+                        <IconButton
+                          icon={<Edit3 size={18} />}
+                          aria-label="Edit strategy"
+                          variant="ghost"
+                          onClick={() => startEdit(s)}
+                        />
+                        <IconButton
+                          icon={<Trash2 size={18} />}
+                          aria-label="Delete strategy"
+                          variant="ghost"
+                          onClick={() => remove(s.id)}
+                          className="text-rose-500 hover:bg-rose-50"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ))}
+        );
+        })}
       </div>
     </div>
   );

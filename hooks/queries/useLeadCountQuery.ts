@@ -36,6 +36,7 @@ export function useLeadStatusCounts() {
                     replied: 0,
                     qualified: 0,
                     disqualified: 0,
+                    no_reply: 0,
                 };
             }
             return await getLeadCountsByStatus(user.id);

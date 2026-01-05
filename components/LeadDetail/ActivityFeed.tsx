@@ -101,6 +101,8 @@ const ActivityFeed: React.FC<ActivityFeedProps> = memo(({
   const [channel, setChannel] = useState<ComposerChannel>(initialChannel);
   const [showSchedule, setShowSchedule] = useState(false);
   const [scheduleNote, setScheduleNote] = useState('');
+  const [customDate, setCustomDate] = useState('');
+  const [customTime, setCustomTime] = useState('09:00');
   const inputRef = useRef<HTMLDivElement>(null);
 
   // Update channel when initialChannel changes
@@ -143,8 +145,6 @@ const ActivityFeed: React.FC<ActivityFeedProps> = memo(({
   };
 
   const handleQuickSchedule = (hours: number | null, customDate?: string) => {
-    if (!note.trim()) return;
-
     const scheduleData = customDate
       ? { hours: null, customDate, note: scheduleNote }
       : { hours, note: scheduleNote };
@@ -379,8 +379,8 @@ const ActivityFeed: React.FC<ActivityFeedProps> = memo(({
           {showSchedule && (
             <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-lg space-y-3 animate-in slide-in-from-top-2 duration-200">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <ScheduleButton icon={<Clock size={14} />} label="1 Hour" onClick={() => handleQuickSchedule(1)} disabled={!note.trim()} />
-                <ScheduleButton icon={<Calendar size={14} />} label="Tomorrow" onClick={() => handleQuickSchedule(24)} disabled={!note.trim()} />
+                <ScheduleButton icon={<Clock size={14} />} label="1 Hour" onClick={() => handleQuickSchedule(1)} />
+                <ScheduleButton icon={<Calendar size={14} />} label="Tomorrow" onClick={() => handleQuickSchedule(24)} />
                 <ScheduleButton
                   icon={<CheckCircle2 size={14} />}
                   label="End of Day"
@@ -389,7 +389,6 @@ const ActivityFeed: React.FC<ActivityFeedProps> = memo(({
                     date.setHours(17, 0, 0, 0);
                     handleQuickSchedule(null, date.toISOString());
                   }}
-                  disabled={!note.trim()}
                 />
                 <ScheduleButton
                   icon={<Bell size={14} />}
@@ -400,9 +399,47 @@ const ActivityFeed: React.FC<ActivityFeedProps> = memo(({
                     date.setHours(9, 0, 0, 0);
                     handleQuickSchedule(null, date.toISOString());
                   }}
-                  disabled={!note.trim()}
                 />
               </div>
+
+              {/* Custom Date/Time Picker */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="date"
+                  value={customDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setCustomDate(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-white border border-blue-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500/20 outline-none"
+                />
+                <input
+                  type="time"
+                  value={customTime}
+                  onChange={(e) => setCustomTime(e.target.value)}
+                  className="w-24 px-3 py-2 bg-white border border-blue-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500/20 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!customDate) return;
+                    const dateParts = customDate.split('-').map(Number);
+                    const timeParts = customTime.split(':').map(Number);
+                    const year = dateParts[0] ?? 0;
+                    const month = dateParts[1] ?? 1;
+                    const day = dateParts[2] ?? 1;
+                    const hours = timeParts[0] ?? 9;
+                    const minutes = timeParts[1] ?? 0;
+                    const date = new Date(year, month - 1, day, hours, minutes);
+                    handleQuickSchedule(null, date.toISOString());
+                    setCustomDate('');
+                    setCustomTime('09:00');
+                  }}
+                  disabled={!customDate}
+                  className="px-4 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all"
+                >
+                  Set
+                </button>
+              </div>
+
               <input
                 type="text"
                 value={scheduleNote}

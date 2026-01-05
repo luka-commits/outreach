@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../../services/supabase';
 import { LeadFilters, PaginatedResponse } from '../../services/supabase';
 import { queryKeys } from '../../lib/queryClient';
-import { Lead } from '../../types';
+import { Lead, LostReason } from '../../types';
 
 export function useLeadsPaginatedQuery(userId: string | undefined, filters: LeadFilters) {
     return useQuery({
@@ -134,9 +134,9 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
             onSettled: (_data, _error, updatedLead) => {
                 // Only invalidate tasks if status, nextTaskDate, or strategy changed
                 // These are the fields that affect the task queue
-                const taskRelevantFields = ['status', 'nextTaskDate', 'strategyId', 'currentStepIndex'];
+                const taskRelevantFields = ['status', 'nextTaskDate', 'strategyId', 'currentStepIndex', 'replySequenceActive', 'replySequenceNextDate'];
                 const needsTaskInvalidation = taskRelevantFields.some(field =>
-                    field in updatedLead && updatedLead[field as keyof Lead] !== undefined
+                    field in updatedLead
                 );
 
                 if (needsTaskInvalidation) {
@@ -195,9 +195,9 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
         }),
 
         bulkUpdateStatus: useMutation({
-            mutationFn: ({ ids, status }: { ids: string[]; status: Lead['status'] }) =>
-                api.updateLeadsStatus(ids, status, userId!),
-            onMutate: async ({ ids, status }) => {
+            mutationFn: ({ ids, status, lostReason, lostReasonNote }: { ids: string[]; status: Lead['status']; lostReason?: LostReason; lostReasonNote?: string }) =>
+                api.updateLeadsStatus(ids, status, userId!, lostReason, lostReasonNote),
+            onMutate: async ({ ids, status, lostReason, lostReasonNote }) => {
                 await queryClient.cancelQueries({ queryKey: queryKeys.leads(userId!) });
 
                 // Snapshot previous data
@@ -216,6 +216,8 @@ export function usePaginatedLeadMutations(userId: string | undefined) {
                             ...l,
                             status,
                             nextTaskDate: isTerminal ? undefined : l.nextTaskDate,
+                            lostReason: status === 'disqualified' ? lostReason : undefined,
+                            lostReasonNote: status === 'disqualified' ? lostReasonNote : undefined,
                         };
                     };
 

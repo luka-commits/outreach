@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, ScrapeJob, CallRecord, TwilioCredentials, CallMetrics, GmailCredentials, ResendCredentials, EmailProvider, LeadTag, LeadNote, StrategyPerformance, SavedFilter, DuplicateGroup, MergeConfig, ChannelPerformance, WeeklyTrend, ReportingDashboard, UserPublicProfile, UserActivityMetrics, LeaderboardEntry, UserRankInfo, LeaderboardPeriod, CustomFieldDefinition, CustomFieldValue, CustomFieldType, CustomFieldFormValue, SelectOption } from '../types';
+import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, ScrapeJob, CallRecord, TwilioCredentials, CallMetrics, GmailCredentials, ResendCredentials, EmailProvider, LeadTag, LeadNote, StrategyPerformance, SavedFilter, DuplicateGroup, MergeConfig, ChannelPerformance, WeeklyTrend, ReportingDashboard, UserPublicProfile, UserActivityMetrics, LeaderboardEntry, UserRankInfo, LeaderboardPeriod, CustomFieldDefinition, CustomFieldValue, CustomFieldType, CustomFieldFormValue, SelectOption, TaskAction, ReplyFollowUp, LostReason, PipelinePreferences } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -84,6 +84,22 @@ interface DbLead {
   next_task_note: string | null;
   status: string;
   last_activity_at: string | null;
+  // Reply sequence tracking (multi-step follow-up after reply)
+  reply_sequence_active: boolean;
+  reply_sequence_channel: string | null;
+  reply_sequence_step_index: number;
+  reply_sequence_completed_indexes: number[] | null;
+  reply_sequence_next_date: string | null;
+  // No-reply tracking
+  strategy_completed_at: string | null;
+  // Lost reason tracking
+  lost_reason: string | null;
+  lost_reason_note: string | null;
+  // Reply follow-up (legacy single follow-up)
+  has_reply_follow_up: boolean | null;
+  reply_follow_up_action: string | null;
+  reply_follow_up_date: string | null;
+  reply_follow_up_template: string | null;
   created_at: string;
 }
 
@@ -106,7 +122,11 @@ interface DbStrategy {
   description: string | null;
   steps: StrategyStep[];
   color: string | null;
+  reply_sequence: StrategyStep[] | null;
+  no_reply_delay_days: number | null;
+  reply_follow_up: ReplyFollowUp | null;
   created_at: string;
+  position: number;
 }
 
 // Keeping for API contract documentation
@@ -176,6 +196,22 @@ const dbLeadToLead = (db: DbLead): Lead => ({
   nextTaskNote: db.next_task_note || undefined,
   status: db.status as Lead['status'],
   lastActivityAt: db.last_activity_at || undefined,
+  // Reply sequence tracking
+  replySequenceActive: db.reply_sequence_active || false,
+  replySequenceChannel: (db.reply_sequence_channel as TaskAction) || undefined,
+  replySequenceStepIndex: db.reply_sequence_step_index || 0,
+  replySequenceCompletedIndexes: db.reply_sequence_completed_indexes || [],
+  replySequenceNextDate: db.reply_sequence_next_date || undefined,
+  // No-reply tracking
+  strategyCompletedAt: db.strategy_completed_at || undefined,
+  // Lost reason tracking
+  lostReason: (db.lost_reason as LostReason) || undefined,
+  lostReasonNote: db.lost_reason_note || undefined,
+  // Reply follow-up (legacy single follow-up)
+  hasReplyFollowUp: db.has_reply_follow_up || undefined,
+  replyFollowUpAction: (db.reply_follow_up_action as TaskAction) || undefined,
+  replyFollowUpDate: db.reply_follow_up_date || undefined,
+  replyFollowUpTemplate: db.reply_follow_up_template || undefined,
   createdAt: db.created_at,
 });
 
@@ -211,6 +247,17 @@ const leadToDbLead = (lead: Lead, userId: string): Partial<DbLead> => ({
   next_task_date: lead.nextTaskDate || null,
   next_task_note: lead.nextTaskNote || null,
   status: lead.status,
+  // Reply sequence tracking
+  reply_sequence_active: lead.replySequenceActive || false,
+  reply_sequence_channel: lead.replySequenceChannel || null,
+  reply_sequence_step_index: lead.replySequenceStepIndex || 0,
+  reply_sequence_completed_indexes: lead.replySequenceCompletedIndexes || [],
+  reply_sequence_next_date: lead.replySequenceNextDate || null,
+  // No-reply tracking
+  strategy_completed_at: lead.strategyCompletedAt || null,
+  // Lost reason tracking
+  lost_reason: lead.lostReason || null,
+  lost_reason_note: lead.lostReasonNote || null,
   created_at: lead.createdAt,
 });
 
@@ -243,6 +290,10 @@ const dbStrategyToStrategy = (db: DbStrategy): Strategy => ({
   description: db.description || '',
   steps: db.steps,
   color: (db.color as Strategy['color']) || 'indigo',
+  replySequence: db.reply_sequence || undefined,
+  noReplyDelayDays: db.no_reply_delay_days ?? undefined,
+  replyFollowUp: db.reply_follow_up || undefined,
+  position: db.position ?? 0,
 });
 
 const strategyToDbStrategy = (strategy: Strategy, userId: string): Partial<DbStrategy> => ({
@@ -252,12 +303,108 @@ const strategyToDbStrategy = (strategy: Strategy, userId: string): Partial<DbStr
   description: strategy.description,
   steps: strategy.steps,
   color: strategy.color,
+  reply_sequence: strategy.replySequence || null,
+  no_reply_delay_days: strategy.noReplyDelayDays ?? null,
+  reply_follow_up: strategy.replyFollowUp || null,
+  position: strategy.position ?? 0,
 });
 
 // Terminal statuses that stop future tasks from being generated
 // When a lead reaches one of these statuses, we clear next_task_date
 // but keep strategyId and currentStepIndex for reporting purposes
-const TERMINAL_STATUSES: Lead['status'][] = ['replied', 'qualified', 'disqualified'];
+const TERMINAL_STATUSES: Lead['status'][] = ['replied', 'qualified', 'disqualified', 'no_reply'];
+
+/**
+ * Maps a reply platform to the corresponding TaskAction for follow-up.
+ * Used when creating reply follow-up tasks to match the channel the reply came from.
+ */
+export function platformToAction(platform: Activity['platform']): TaskAction {
+  switch (platform) {
+    case 'email': return 'send_email';
+    case 'instagram': return 'send_dm';
+    case 'facebook': return 'fb_message';
+    case 'linkedin': return 'linkedin_dm';
+    case 'call': return 'call';
+    case 'walkIn': return 'walk_in';
+    default: return 'manual';
+  }
+}
+
+/**
+ * Gets the channel label for display based on TaskAction.
+ */
+export function getActionLabel(action: TaskAction): string {
+  const labels: Record<TaskAction, string> = {
+    send_dm: 'Instagram DM',
+    send_email: 'Email',
+    call: 'Call',
+    fb_message: 'Facebook Message',
+    linkedin_dm: 'LinkedIn Message',
+    manual: 'Manual Task',
+    walk_in: 'Walk-in',
+  };
+  return labels[action] || 'Task';
+}
+
+/**
+ * Creates a reply follow-up task for a lead when a reply is logged.
+ * This is a legacy single follow-up (not the multi-step reply sequence).
+ */
+export async function createReplyFollowUp(
+  leadId: string,
+  userId: string,
+  replyPlatform: Activity['platform'],
+  strategy: Strategy
+): Promise<Lead | null> {
+  // Check if strategy has reply follow-up enabled
+  if (!strategy.replyFollowUp?.enabled) {
+    return null;
+  }
+
+  // Calculate follow-up date based on configured delay
+  const followUpDate = new Date();
+  followUpDate.setHours(followUpDate.getHours() + strategy.replyFollowUp.delayHours);
+
+  // Map reply platform to task action (same channel follow-up)
+  const followUpAction = platformToAction(replyPlatform);
+
+  const { data, error } = await supabase
+    .from('leads')
+    .update({
+      has_reply_follow_up: true,
+      reply_follow_up_action: followUpAction,
+      reply_follow_up_date: followUpDate.toISOString().split('T')[0], // Date only
+      reply_follow_up_template: strategy.replyFollowUp.template,
+    })
+    .eq('id', leadId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return dbLeadToLead(data);
+}
+
+/**
+ * Clears reply follow-up data after the follow-up task is completed.
+ */
+export async function clearReplyFollowUp(
+  leadId: string,
+  userId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('leads')
+    .update({
+      has_reply_follow_up: false,
+      reply_follow_up_action: null,
+      reply_follow_up_date: null,
+      reply_follow_up_template: null,
+    })
+    .eq('id', leadId)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+}
 
 const dbScrapeJobToScrapeJob = (db: DbScrapeJob): ScrapeJob => ({
   id: db.id,
@@ -282,27 +429,49 @@ const dbScrapeJobToScrapeJob = (db: DbScrapeJob): ScrapeJob => ({
 export async function getDueTasks(userId: string): Promise<Lead[]> {
   const today = new Date();
   today.setHours(23, 59, 59, 999);
+  const todayDate = today.toISOString().split('T')[0]; // YYYY-MM-DD for date comparison
 
-  const { data, error } = await supabase
+  // Fetch regular in_progress tasks
+  const { data: regularTasks, error: regularError } = await supabase
     .from('leads')
     .select('*')
     .eq('user_id', userId)
     .eq('status', 'in_progress')
     .lte('next_task_date', today.toISOString())
     .order('next_task_date', { ascending: true })
-    .limit(500); // SECURITY: Prevent unbounded queries
+    .limit(500);
 
-  if (error) throw error;
-  return (data || []).map(dbLeadToLead);
+  if (regularError) throw regularError;
+
+  // Fetch reply sequence tasks (can be any status as long as sequence is active)
+  const { data: replyTasks, error: replyError } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('reply_sequence_active', true)
+    .lte('reply_sequence_next_date', todayDate)
+    .order('reply_sequence_next_date', { ascending: true })
+    .limit(500);
+
+  if (replyError) throw replyError;
+
+  // Combine and deduplicate (a lead might appear in both if it has both types of tasks)
+  const allTasks = [...(regularTasks || []), ...(replyTasks || [])];
+  const uniqueTasksMap = new Map(allTasks.map(t => [t.id, t]));
+  const uniqueTasks = Array.from(uniqueTasksMap.values());
+
+  return uniqueTasks.map(dbLeadToLead);
 }
 
 /**
  * Get all scheduled tasks including upcoming ones.
- * Fetches in_progress leads with a next_task_date set.
+ * Fetches in_progress leads with a next_task_date set,
+ * plus leads with active reply sequences.
  * Limited to most recent 500 for performance.
  */
 export async function getAllScheduledTasks(userId: string): Promise<Lead[]> {
-  const { data, error } = await supabase
+  // Fetch regular in_progress tasks with scheduled dates
+  const { data: regularTasks, error: regularError } = await supabase
     .from('leads')
     .select('*')
     .eq('user_id', userId)
@@ -311,8 +480,26 @@ export async function getAllScheduledTasks(userId: string): Promise<Lead[]> {
     .order('next_task_date', { ascending: true })
     .limit(500);
 
-  if (error) throw error;
-  return (data || []).map(dbLeadToLead);
+  if (regularError) throw regularError;
+
+  // Fetch reply sequence tasks (can be any status as long as sequence is active)
+  const { data: replyTasks, error: replyError } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('reply_sequence_active', true)
+    .not('reply_sequence_next_date', 'is', null)
+    .order('reply_sequence_next_date', { ascending: true })
+    .limit(500);
+
+  if (replyError) throw replyError;
+
+  // Combine and deduplicate
+  const allTasks = [...(regularTasks || []), ...(replyTasks || [])];
+  const uniqueTasksMap = new Map(allTasks.map(t => [t.id, t]));
+  const uniqueTasks = Array.from(uniqueTasksMap.values());
+
+  return uniqueTasks.map(dbLeadToLead);
 }
 
 /**
@@ -444,6 +631,15 @@ export async function updateLead(lead: Lead, userId: string): Promise<Lead> {
     leadToUpdate.nextTaskDate = undefined;
   }
 
+  // Disqualified leads should have reply sequence cleared
+  if (lead.status === 'disqualified') {
+    leadToUpdate.replySequenceActive = false;
+    leadToUpdate.replySequenceChannel = undefined;
+    leadToUpdate.replySequenceStepIndex = 0;
+    leadToUpdate.replySequenceCompletedIndexes = [];
+    leadToUpdate.replySequenceNextDate = undefined;
+  }
+
   const { data, error } = await supabase
     .from('leads')
     .update(leadToDbLead(leadToUpdate, userId))
@@ -464,6 +660,163 @@ export async function deleteLead(id: string, userId: string): Promise<void> {
     .eq('user_id', userId);
 
   if (error) throw error;
+}
+
+// ============================================
+// REPLY SEQUENCE OPERATIONS
+// Multi-step follow-up sequence triggered when leads reply
+// Runs in parallel to main strategy sequence
+// ============================================
+
+/**
+ * Starts a reply sequence for a lead based on strategy configuration.
+ * Called when a reply is logged via LogReplyModal.
+ * The sequence uses the same channel the reply came from.
+ * First step (dayOffset: 0) appears immediately.
+ */
+export async function startReplySequence(
+  leadId: string,
+  userId: string,
+  replyPlatform: Activity['platform'],
+  strategy: Strategy
+): Promise<Lead | null> {
+  // Check if strategy has reply sequence configured
+  if (!strategy.replySequence || strategy.replySequence.length === 0) {
+    return null;
+  }
+
+  // Map reply platform to task action (all sequence tasks use this channel)
+  const sequenceChannel = platformToAction(replyPlatform);
+
+  // Find first step to determine initial next date
+  const firstStep = strategy.replySequence[0];
+  const nextDate = new Date();
+  nextDate.setDate(nextDate.getDate() + (firstStep?.dayOffset || 0));
+
+  const { data, error } = await supabase
+    .from('leads')
+    .update({
+      reply_sequence_active: true,
+      reply_sequence_channel: sequenceChannel,
+      reply_sequence_step_index: 0,
+      reply_sequence_completed_indexes: [],
+      reply_sequence_next_date: nextDate.toISOString().split('T')[0],
+    })
+    .eq('id', leadId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return dbLeadToLead(data);
+}
+
+/**
+ * Advances the reply sequence to the next step or day group.
+ * Similar logic to main strategy progression.
+ */
+export async function advanceReplySequence(
+  leadId: string,
+  userId: string,
+  currentStepIndex: number,
+  completedIndexes: number[],
+  strategy: Strategy
+): Promise<Lead | null> {
+  if (!strategy.replySequence || strategy.replySequence.length === 0) {
+    return null;
+  }
+
+  const steps = strategy.replySequence;
+  const currentStep = steps[currentStepIndex];
+  if (!currentStep) return null;
+
+  const currentDayOffset = currentStep.dayOffset;
+  const completedSet = new Set(completedIndexes);
+  completedSet.add(currentStepIndex);
+
+  // Find all steps with the same dayOffset
+  const sameDaySteps = steps
+    .map((s, i) => ({ step: s, index: i }))
+    .filter(({ step: s }) => s.dayOffset === currentDayOffset);
+
+  // Check if all same-day tasks are now complete
+  const allSameDayComplete = sameDaySteps.every(({ index }) => completedSet.has(index));
+
+  if (allSameDayComplete) {
+    // Find next day group
+    const nextDaySteps = steps
+      .map((s, i) => ({ step: s, index: i }))
+      .filter(({ step: s, index: i }) => s.dayOffset > currentDayOffset && !completedSet.has(i))
+      .sort((a, b) => a.step.dayOffset - b.step.dayOffset);
+
+    if (nextDaySteps.length > 0 && nextDaySteps[0]) {
+      // Advance to next day group
+      const nextDayStep = nextDaySteps[0];
+      const nextDayOffset = nextDayStep.step.dayOffset;
+      const nextStepIndex = steps.findIndex(s => s.dayOffset === nextDayOffset);
+
+      const dayDiff = nextDayOffset - currentDayOffset;
+      const newDate = new Date();
+      newDate.setDate(newDate.getDate() + dayDiff);
+
+      const { data, error } = await supabase
+        .from('leads')
+        .update({
+          reply_sequence_step_index: nextStepIndex >= 0 ? nextStepIndex : currentStepIndex,
+          reply_sequence_completed_indexes: [],
+          reply_sequence_next_date: newDate.toISOString().split('T')[0],
+        })
+        .eq('id', leadId)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return dbLeadToLead(data);
+    } else {
+      // Sequence complete - clear state
+      return clearReplySequence(leadId, userId);
+    }
+  } else {
+    // More tasks for this day - just update completed indexes
+    const { data, error } = await supabase
+      .from('leads')
+      .update({
+        reply_sequence_completed_indexes: Array.from(completedSet),
+      })
+      .eq('id', leadId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return dbLeadToLead(data);
+  }
+}
+
+/**
+ * Clears reply sequence state when complete or lead is disqualified.
+ */
+export async function clearReplySequence(
+  leadId: string,
+  userId: string
+): Promise<Lead> {
+  const { data, error } = await supabase
+    .from('leads')
+    .update({
+      reply_sequence_active: false,
+      reply_sequence_channel: null,
+      reply_sequence_step_index: 0,
+      reply_sequence_completed_indexes: [],
+      reply_sequence_next_date: null,
+    })
+    .eq('id', leadId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return dbLeadToLead(data);
 }
 
 // ============================================
@@ -497,12 +850,15 @@ export async function deleteLeads(ids: string[], userId: string): Promise<void> 
 /**
  * Bulk update status for multiple leads.
  * Handles terminal status auto-stop (clears next_task_date).
+ * Clears reply sequence when lead is disqualified.
  * Chunks large batches to avoid query limits.
  */
 export async function updateLeadsStatus(
   ids: string[],
   status: Lead['status'],
-  userId: string
+  userId: string,
+  lostReason?: LostReason,
+  lostReasonNote?: string
 ): Promise<void> {
   if (ids.length === 0) return;
 
@@ -512,6 +868,21 @@ export async function updateLeadsStatus(
   // Terminal statuses clear next_task_date (Auto-Stop)
   if (TERMINAL_STATUSES.includes(status)) {
     updateData.next_task_date = null;
+  }
+
+  // Disqualified leads should have reply sequence cleared and lost reason set
+  if (status === 'disqualified') {
+    updateData.reply_sequence_active = false;
+    updateData.reply_sequence_channel = null;
+    updateData.reply_sequence_step_index = 0;
+    updateData.reply_sequence_completed_indexes = [];
+    updateData.reply_sequence_next_date = null;
+    updateData.lost_reason = lostReason || null;
+    updateData.lost_reason_note = lostReasonNote || null;
+  } else {
+    // Clear lost reason when changing to non-disqualified status
+    updateData.lost_reason = null;
+    updateData.lost_reason_note = null;
   }
 
   // Process in batches to avoid query limits
@@ -620,7 +991,7 @@ export async function getStrategies(userId: string): Promise<Strategy[]> {
     .from('strategies')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+    .order('position', { ascending: true });
 
   if (error) throw error;
   return (data || []).map(dbStrategyToStrategy);
@@ -658,6 +1029,22 @@ export async function deleteStrategy(id: string, userId: string): Promise<void> 
     .eq('user_id', userId);
 
   if (error) throw error;
+}
+
+export async function updateStrategyPositions(
+  updates: Array<{ id: string; position: number }>,
+  userId: string
+): Promise<void> {
+  // Update each strategy position
+  for (const { id, position } of updates) {
+    const { error } = await supabase
+      .from('strategies')
+      .update({ position })
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  }
 }
 
 // Goals API
@@ -933,6 +1320,9 @@ export interface LeadFilters extends PaginationParams {
   // Activity recency filter (stale lead detection)
   staleDays?: number;          // Filter leads with no activity in X days
 
+  // Tag filter (leads with ANY of these tags)
+  tagIds?: string[];
+
   // Multi-column sorting
   sortBy?: SortField[];
   sortDirection?: SortDirection[];
@@ -964,10 +1354,30 @@ export async function getLeadsPaginated(
     ratingMin,
     ratingMax,
     staleDays,
+    tagIds,
     search,
     sortBy = ['created_at'],
     sortDirection = ['desc']
   } = filters;
+
+  // If tag filter is active, first get lead IDs that have ANY of the selected tags
+  let tagFilteredLeadIds: string[] | null = null;
+  if (tagIds && tagIds.length > 0) {
+    const { data: assignments, error: tagError } = await supabase
+      .from('lead_tag_assignments')
+      .select('lead_id')
+      .in('tag_id', tagIds);
+
+    if (tagError) throw tagError;
+
+    // Get unique lead IDs
+    tagFilteredLeadIds = [...new Set((assignments || []).map(a => a.lead_id))];
+
+    // If no leads match the tag filter, return empty result immediately
+    if (tagFilteredLeadIds.length === 0) {
+      return { data: [], count: 0, hasMore: false };
+    }
+  }
 
   let query = supabase
     .from('leads')
@@ -984,6 +1394,11 @@ export async function getLeadsPaginated(
   query = query.order('id', { ascending: true });
 
   query = query.range(offset, offset + limit - 1);
+
+  // Apply tag filter (if we have matching lead IDs from tag query)
+  if (tagFilteredLeadIds) {
+    query = query.in('id', tagFilteredLeadIds);
+  }
 
   // Apply status filter (multi-select)
   if (status && status.length > 0) {
@@ -1069,8 +1484,47 @@ export async function getLeadsPaginated(
 
   if (error) throw error;
 
+  const leads = (data || []).map(dbLeadToLead);
+
+  // Fetch tags for all leads in a single query (performance optimization)
+  if (leads.length > 0) {
+    const leadIds = leads.map(l => l.id);
+    const { data: tagAssignments } = await supabase
+      .from('lead_tag_assignments')
+      .select(`
+        lead_id,
+        lead_tags!inner (
+          id,
+          name,
+          color
+        )
+      `)
+      .in('lead_id', leadIds);
+
+    // Build a map of lead_id -> tags
+    const tagsByLeadId = new Map<string, Array<{ id: string; name: string; color: string }>>();
+    if (tagAssignments) {
+      for (const assignment of tagAssignments) {
+        const tag = assignment.lead_tags as unknown as { id: string; name: string; color: string };
+        if (!tagsByLeadId.has(assignment.lead_id)) {
+          tagsByLeadId.set(assignment.lead_id, []);
+        }
+        tagsByLeadId.get(assignment.lead_id)!.push({
+          id: tag.id,
+          name: tag.name,
+          color: tag.color,
+        });
+      }
+    }
+
+    // Attach tags to leads
+    for (const lead of leads) {
+      lead.tags = tagsByLeadId.get(lead.id) || [];
+    }
+  }
+
   return {
-    data: (data || []).map(dbLeadToLead),
+    data: leads,
     count: count || 0,
     hasMore: (count || 0) > offset + limit,
   };
@@ -1152,9 +1606,9 @@ export async function getActivitiesByLead(
  */
 export async function getActivitiesPaginated(
   userId: string,
-  params: PaginationParams & { startDate?: string; endDate?: string } = {}
+  params: PaginationParams & { startDate?: string; endDate?: string; firstOutreachOnly?: boolean } = {}
 ): Promise<PaginatedResponse<Activity>> {
-  const { limit = 100, offset = 0, startDate, endDate } = params;
+  const { limit = 100, offset = 0, startDate, endDate, firstOutreachOnly } = params;
 
   let query = supabase
     .from('activities')
@@ -1168,6 +1622,9 @@ export async function getActivitiesPaginated(
   }
   if (endDate) {
     query = query.lte('timestamp', endDate);
+  }
+  if (firstOutreachOnly) {
+    query = query.eq('is_first_outreach', true);
   }
 
   const { data, error, count } = await query;
@@ -1188,7 +1645,7 @@ export async function getActivitiesPaginated(
 export async function getLeadCountsByStatus(
   userId: string
 ): Promise<Record<Lead['status'], number>> {
-  const statuses: Lead['status'][] = ['not_contacted', 'in_progress', 'replied', 'qualified', 'disqualified'];
+  const statuses: Lead['status'][] = ['not_contacted', 'in_progress', 'replied', 'qualified', 'disqualified', 'no_reply'];
 
   // Run all count queries in parallel for efficiency
   const countPromises = statuses.map(async (status) => {
@@ -1210,6 +1667,7 @@ export async function getLeadCountsByStatus(
     replied: 0,
     qualified: 0,
     disqualified: 0,
+    no_reply: 0,
   };
 
   results.forEach(({ status, count }) => {
@@ -3080,6 +3538,18 @@ export async function refreshUserActivityMetrics(userId: string): Promise<void> 
 }
 
 /**
+ * Reset user activity metrics.
+ * Deletes all activities and resets cached metrics to zero.
+ */
+export async function resetUserActivityMetrics(userId: string): Promise<void> {
+  const { error } = await supabase.rpc('reset_user_activity_metrics', {
+    p_user_id: userId,
+  });
+
+  if (error) throw error;
+}
+
+/**
  * Get leaderboard data.
  * Returns paginated list of visible users sorted by activity count.
  */
@@ -3521,5 +3991,77 @@ export async function customFieldHasValues(
 
   if (error) throw error;
   return (count ?? 0) > 0;
+}
+
+// ============================================
+// Pipeline Preferences
+// ============================================
+
+interface DbPipelinePreferences {
+  id: string;
+  user_id: string;
+  visible_columns: string[];
+  visible_custom_fields: string[];
+  column_order: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function dbPipelinePrefsToPrefs(db: DbPipelinePreferences): PipelinePreferences {
+  return {
+    id: db.id,
+    visibleColumns: db.visible_columns || [],
+    visibleCustomFields: db.visible_custom_fields || [],
+    columnOrder: db.column_order ?? undefined,
+    createdAt: db.created_at,
+    updatedAt: db.updated_at,
+  };
+}
+
+/**
+ * Get pipeline preferences for a user.
+ * Returns null if no preferences have been saved yet.
+ */
+export async function getPipelinePreferences(
+  userId: string
+): Promise<PipelinePreferences | null> {
+  const { data, error } = await supabase
+    .from('pipeline_preferences')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  // PGRST116 = no rows found, which is fine - user hasn't saved preferences yet
+  if (error && error.code !== 'PGRST116') throw error;
+  if (!data) return null;
+
+  return dbPipelinePrefsToPrefs(data);
+}
+
+/**
+ * Upsert pipeline preferences for a user.
+ * Creates if not exists, updates if exists.
+ */
+export async function upsertPipelinePreferences(
+  userId: string,
+  preferences: Partial<Pick<PipelinePreferences, 'visibleColumns' | 'visibleCustomFields' | 'columnOrder'>>
+): Promise<PipelinePreferences> {
+  const { data, error } = await supabase
+    .from('pipeline_preferences')
+    .upsert(
+      {
+        user_id: userId,
+        visible_columns: preferences.visibleColumns,
+        visible_custom_fields: preferences.visibleCustomFields,
+        column_order: preferences.columnOrder ?? null,
+      },
+      { onConflict: 'user_id' }
+    )
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return dbPipelinePrefsToPrefs(data);
 }
 

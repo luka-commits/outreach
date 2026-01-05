@@ -120,8 +120,28 @@ export async function safeDecrypt(encryptedBase64: string | null): Promise<strin
 
 /**
  * Checks if encryption is properly configured.
+ *
+ * SECURITY: In production, encryption MUST be configured.
+ * If this returns false, callers should reject the operation
+ * rather than falling back to plaintext storage.
  */
 export function isEncryptionConfigured(): boolean {
   const secretHex = Deno.env.get('ENCRYPTION_SECRET');
   return !!secretHex && secretHex.length === 64;
+}
+
+/**
+ * Ensures encryption is configured, throwing an error if not.
+ * Use this at the start of any function that handles sensitive credentials.
+ *
+ * SECURITY: This prevents accidental plaintext storage of OAuth tokens,
+ * API keys, and other sensitive credentials.
+ */
+export function requireEncryption(): void {
+  if (!isEncryptionConfigured()) {
+    throw new Error(
+      'ENCRYPTION_SECRET environment variable is required for credential storage. ' +
+      'Generate one with: openssl rand -hex 32'
+    );
+  }
 }

@@ -1,4 +1,5 @@
 import React, { memo, useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Settings,
   Plus,
@@ -68,12 +69,14 @@ const CustomFieldsSection: React.FC<CustomFieldsSectionProps> = memo(({ leadId, 
 
   // State for dropdown and field management
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text');
   const [newFieldOptions, setNewFieldOptions] = useState<SelectOption[]>([]);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const [editingFieldName, setEditingFieldName] = useState('');
   const [deleteConfirmFieldId, setDeleteConfirmFieldId] = useState<string | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const isLoading = defsLoading || valsLoading;
 
@@ -99,6 +102,15 @@ const CustomFieldsSection: React.FC<CustomFieldsSectionProps> = memo(({ leadId, 
     setNewFieldName('');
     setNewFieldType('text');
     setNewFieldOptions([]);
+  };
+
+  const handleOpenDropdown = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDropdownPosition({
+      top: rect.bottom + 8,
+      left: rect.left,
+    });
+    setIsDropdownOpen(true);
   };
 
   const handleValueChange = useCallback(
@@ -208,7 +220,8 @@ const CustomFieldsSection: React.FC<CustomFieldsSectionProps> = memo(({ leadId, 
         <div className="py-4 text-center">
           <p className="text-sm text-slate-500 mb-3">No custom fields defined yet</p>
           <button
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            ref={buttonRef}
+            onClick={(e) => isDropdownOpen ? setIsDropdownOpen(false) : handleOpenDropdown(e)}
             className="inline-flex items-center gap-1.5 text-sm text-pilot-blue hover:text-pilot-blue/80 font-medium"
           >
             <Plus size={14} />
@@ -239,6 +252,8 @@ const CustomFieldsSection: React.FC<CustomFieldsSectionProps> = memo(({ leadId, 
             setDeleteConfirmFieldId={setDeleteConfirmFieldId}
             onNavigateToSettings={onNavigateToSettings}
             setIsDropdownOpen={setIsDropdownOpen}
+            position={dropdownPosition}
+            dropdownRef={dropdownRef}
           />
         )}
 
@@ -269,9 +284,10 @@ const CustomFieldsSection: React.FC<CustomFieldsSectionProps> = memo(({ leadId, 
       ))}
 
       {/* Manage button with dropdown */}
-      <div className="relative pt-2" ref={dropdownRef}>
+      <div className="relative pt-2">
         <button
-          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          ref={buttonRef}
+          onClick={(e) => isDropdownOpen ? setIsDropdownOpen(false) : handleOpenDropdown(e)}
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600"
         >
           <Settings size={12} />
@@ -300,6 +316,8 @@ const CustomFieldsSection: React.FC<CustomFieldsSectionProps> = memo(({ leadId, 
             setDeleteConfirmFieldId={setDeleteConfirmFieldId}
             onNavigateToSettings={onNavigateToSettings}
             setIsDropdownOpen={setIsDropdownOpen}
+            position={dropdownPosition}
+            dropdownRef={dropdownRef}
           />
         )}
       </div>
@@ -363,9 +381,15 @@ const CustomFieldInput: React.FC<CustomFieldInputProps> = memo(({
 
   const handleBlur = () => {
     setIsFocused(false);
-    const currentVal = getCurrentValue();
-    if (localValue !== currentVal) {
-      onChange(localValue);
+    // For text/url fields, always save on blur (empty string becomes null)
+    if (field.fieldType === 'text' || field.fieldType === 'url') {
+      const valueToSave = (localValue as string)?.trim() === '' ? null : localValue;
+      onChange(valueToSave);
+    } else {
+      const currentVal = getCurrentValue();
+      if (localValue !== currentVal) {
+        onChange(localValue);
+      }
     }
   };
 
@@ -550,6 +574,8 @@ interface FieldManagementDropdownProps {
   setDeleteConfirmFieldId: (id: string | null) => void;
   onNavigateToSettings?: () => void;
   setIsDropdownOpen: (open: boolean) => void;
+  position: { top: number; left: number };
+  dropdownRef: React.RefObject<HTMLDivElement | null>;
 }
 
 const FieldManagementDropdown: React.FC<FieldManagementDropdownProps> = ({
@@ -573,11 +599,22 @@ const FieldManagementDropdown: React.FC<FieldManagementDropdownProps> = ({
   setDeleteConfirmFieldId,
   onNavigateToSettings,
   setIsDropdownOpen,
+  position,
+  dropdownRef,
 }) => {
   const isSelectType = newFieldType === 'single_select' || newFieldType === 'multi_select';
 
-  return (
-    <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-xl shadow-xl border border-slate-200 z-50 animate-in fade-in zoom-in-95 duration-200">
+  return createPortal(
+    <div
+      ref={dropdownRef}
+      style={{
+        position: 'fixed',
+        top: position.top,
+        left: position.left,
+        zIndex: 9999,
+      }}
+      className="w-72 bg-white rounded-xl shadow-xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200"
+    >
       {/* Create New Field Section */}
       <div className="p-3 border-b border-slate-100">
         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -711,7 +748,8 @@ const FieldManagementDropdown: React.FC<FieldManagementDropdownProps> = ({
           </button>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
 

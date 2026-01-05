@@ -3,6 +3,8 @@ import * as api from '../../services/supabase';
 import { Strategy } from '../../types';
 import { queryKeys } from '../../lib/queryClient';
 
+type PositionUpdate = { id: string; position: number };
+
 /**
  * Query hook for fetching all strategies for a user.
  */
@@ -96,7 +98,39 @@ export function useStrategyMutations(userId: string | undefined) {
     },
   });
 
-  return { addStrategy, updateStrategy, deleteStrategy };
+  const reorderStrategies = useMutation({
+    mutationFn: (updates: PositionUpdate[]) => api.updateStrategyPositions(updates, userId!),
+    onMutate: async (updates) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.strategies(userId!) });
+
+      const previousStrategies = queryClient.getQueryData<Strategy[]>(
+        queryKeys.strategies(userId!)
+      );
+
+      // Apply position updates optimistically
+      queryClient.setQueryData<Strategy[]>(queryKeys.strategies(userId!), (old = []) => {
+        const positionMap = new Map(updates.map((u) => [u.id, u.position]));
+        return old
+          .map((s) => ({
+            ...s,
+            position: positionMap.has(s.id) ? positionMap.get(s.id)! : (s.position ?? 0),
+          }))
+          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+      });
+
+      return { previousStrategies };
+    },
+    onError: (_err, _updates, context) => {
+      if (context?.previousStrategies) {
+        queryClient.setQueryData(queryKeys.strategies(userId!), context.previousStrategies);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.strategies(userId!) });
+    },
+  });
+
+  return { addStrategy, updateStrategy, deleteStrategy, reorderStrategies };
 }
 
 /**
@@ -105,7 +139,7 @@ export function useStrategyMutations(userId: string | undefined) {
  */
 export function useStrategies(userId: string | undefined) {
   const { data = [], isLoading, error, refetch } = useStrategiesQuery(userId);
-  const { addStrategy, updateStrategy, deleteStrategy } = useStrategyMutations(userId);
+  const { addStrategy, updateStrategy, deleteStrategy, reorderStrategies } = useStrategyMutations(userId);
 
   return {
     strategies: data,
@@ -120,15 +154,11 @@ export function useStrategies(userId: string | undefined) {
     deleteStrategy: async (id: string) => {
       await deleteStrategy.mutateAsync(id);
     },
-    updateStrategies: (newStrategies: Strategy[]) => {
-      // Direct cache update for bulk operations
-      queryClient.setQueryData(queryKeys.strategies(userId!), newStrategies);
+    reorderStrategies: async (updates: PositionUpdate[]) => {
+      await reorderStrategies.mutateAsync(updates);
     },
     refetch: async () => {
       await refetch();
     },
   };
 }
-
-// Need to export queryClient for updateStrategies
-import { queryClient } from '../../lib/queryClient';

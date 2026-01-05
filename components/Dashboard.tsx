@@ -107,7 +107,8 @@ const Dashboard: React.FC<DashboardProps> = ({ leads: _leads, activities: _legac
 
   const { data: chartActivities = [] } = useActivitiesPaginatedQuery(user?.id, {
     startDate: chartStartDate,
-    limit: 5000
+    limit: 5000,
+    firstOutreachOnly: true, // Only count first outreach activities for consistency chart
   });
 
   const chartData = useMemo(() => {

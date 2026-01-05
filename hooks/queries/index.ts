@@ -98,6 +98,7 @@ export {
   useUserPublicProfileMutations,
   useUserActivityMetricsQuery,
   useRefreshUserActivityMetrics,
+  useResetUserActivityMetrics,
   useLeaderboardQuery,
   useUserRankQuery,
   useNetworking,
@@ -122,3 +123,9 @@ export {
 
 // Onboarding Progress
 export { useOnboardingProgress, type OnboardingProgress } from './useOnboardingProgressQuery';
+
+// Pipeline Preferences (column visibility)
+export {
+  usePipelinePreferencesQuery,
+  useUpdatePipelinePreferences,
+} from './usePipelinePreferencesQuery';

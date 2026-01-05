@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Sparkles, CheckCircle2, MoreHorizontal } from 'lucide-react';
+import { Sparkles, CheckCircle2, XCircle } from 'lucide-react';
 import { LeadStatus } from '../../types';
 
 interface QualifyModalProps {
@@ -7,6 +7,7 @@ interface QualifyModalProps {
   companyName: string;
   onClose: () => void;
   onQualify: (status: LeadStatus) => void;
+  onDisqualify?: () => void; // Opens DisqualifyModal for reason selection
 }
 
 const QualifyModal: React.FC<QualifyModalProps> = memo(({
@@ -14,8 +15,19 @@ const QualifyModal: React.FC<QualifyModalProps> = memo(({
   companyName,
   onClose,
   onQualify,
+  onDisqualify,
 }) => {
   if (!isOpen) return null;
+
+  const handleDisqualify = () => {
+    onClose(); // Close this modal first
+    if (onDisqualify) {
+      onDisqualify(); // Open DisqualifyModal for reason selection
+    } else {
+      // Fallback for backwards compatibility if onDisqualify not provided
+      onQualify('disqualified');
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-end md:items-center justify-center p-4">
@@ -39,11 +51,11 @@ const QualifyModal: React.FC<QualifyModalProps> = memo(({
             color="hover:bg-blue-50 hover:border-blue-200"
           />
           <QualifyOption
-            icon={<MoreHorizontal className="text-slate-500" />}
+            icon={<XCircle className="text-rose-500" />}
             label="Disqualify"
             desc="No interest or poor fit."
-            onClick={() => onQualify('disqualified')}
-            color="hover:bg-slate-50 hover:border-slate-200"
+            onClick={handleDisqualify}
+            color="hover:bg-rose-50 hover:border-rose-200"
           />
         </div>
         <button

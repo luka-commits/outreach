@@ -1,0 +1,557 @@
+{
+  "tech_stack": [
+    "TypeScript",
+    "Deno",
+    "Supabase Edge Functions",
+    "Supabase Auth",
+    "PostgreSQL",
+    "React",
+    "Vite",
+    "TanStack Query"
+  ],
+  "features": [
+    {
+      "name": "cancel-job",
+      "description": "Cancels a running scrape job. Requires authenticated user who owns the job.",
+      "files": ["supabase/functions/cancel-job/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/cancel-job": {
+            "post": {
+              "summary": "Cancel a scrape job",
+              "security": [{"bearerAuth": []}],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["job_id"],
+                      "properties": {
+                        "job_id": {"type": "string", "format": "uuid"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Job cancelled successfully"},
+                "401": {"description": "Unauthorized"},
+                "404": {"description": "Job not found or permission denied"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "scrape-callback",
+      "description": "Webhook endpoint that receives scraped leads from Modal pipeline. Validates webhook secret, processes leads, and updates job status.",
+      "files": ["supabase/functions/scrape-callback/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/scrape-callback": {
+            "post": {
+              "summary": "Receive scraped leads from Modal",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["job_id", "user_id", "secret", "status"],
+                      "properties": {
+                        "job_id": {"type": "string"},
+                        "user_id": {"type": "string"},
+                        "secret": {"type": "string"},
+                        "status": {"type": "string", "enum": ["success", "error"]},
+                        "error_message": {"type": "string"},
+                        "leads": {"type": "array"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Callback processed"},
+                "401": {"description": "Invalid webhook secret"},
+                "404": {"description": "Job not found"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "gmail-oauth-callback",
+      "description": "Handles Gmail OAuth callback. Exchanges authorization code for tokens and stores encrypted credentials.",
+      "files": ["supabase/functions/gmail-oauth-callback/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/gmail-oauth-callback": {
+            "post": {
+              "summary": "Complete Gmail OAuth flow",
+              "security": [{"bearerAuth": []}],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["code", "codeVerifier", "redirectUri"],
+                      "properties": {
+                        "code": {"type": "string"},
+                        "codeVerifier": {"type": "string"},
+                        "redirectUri": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Gmail connected successfully"},
+                "400": {"description": "Token exchange failed"},
+                "401": {"description": "Unauthorized"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "verify-twilio",
+      "description": "Verifies Twilio credentials, TwiML app, and phone number in a multi-step flow.",
+      "files": ["supabase/functions/verify-twilio/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/verify-twilio": {
+            "post": {
+              "summary": "Verify Twilio configuration",
+              "security": [{"bearerAuth": []}],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["accountSid", "authToken", "step"],
+                      "properties": {
+                        "accountSid": {"type": "string"},
+                        "authToken": {"type": "string"},
+                        "twimlAppSid": {"type": "string"},
+                        "phoneNumber": {"type": "string"},
+                        "step": {"type": "string", "enum": ["credentials", "twiml_app", "phone_number"]}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Verification successful"},
+                "400": {"description": "Verification failed"},
+                "401": {"description": "Unauthorized"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "save-twilio-credentials",
+      "description": "Saves Twilio credentials with encryption to user profile.",
+      "files": ["supabase/functions/save-twilio-credentials/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/save-twilio-credentials": {
+            "post": {
+              "summary": "Save Twilio credentials",
+              "security": [{"bearerAuth": []}],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["accountSid", "authToken", "twimlAppSid", "phoneNumber"],
+                      "properties": {
+                        "accountSid": {"type": "string"},
+                        "authToken": {"type": "string"},
+                        "twimlAppSid": {"type": "string"},
+                        "phoneNumber": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Credentials saved"},
+                "400": {"description": "Missing credentials"},
+                "401": {"description": "Unauthorized"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "save-resend-credentials",
+      "description": "Saves Resend API key with encryption to user profile.",
+      "files": ["supabase/functions/save-resend-credentials/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/save-resend-credentials": {
+            "post": {
+              "summary": "Save Resend API credentials",
+              "security": [{"bearerAuth": []}],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["apiKey"],
+                      "properties": {
+                        "apiKey": {"type": "string"},
+                        "fromEmail": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Credentials saved"},
+                "400": {"description": "Missing API key"},
+                "401": {"description": "Unauthorized"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "call-status",
+      "description": "Twilio webhook that receives call status updates. Validates Twilio signature and updates call records.",
+      "files": ["supabase/functions/call-status/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/call-status": {
+            "post": {
+              "summary": "Receive call status updates from Twilio",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "CallSid": {"type": "string"},
+                        "CallStatus": {"type": "string"},
+                        "CallDuration": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Status updated"},
+                "403": {"description": "Invalid signature"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "twilio-token",
+      "description": "Generates Twilio access token for browser-based calling.",
+      "files": ["supabase/functions/twilio-token/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/twilio-token": {
+            "post": {
+              "summary": "Generate Twilio access token",
+              "security": [{"bearerAuth": []}],
+              "responses": {
+                "200": {
+                  "description": "Token generated",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "token": {"type": "string"},
+                          "identity": {"type": "string"},
+                          "expiresIn": {"type": "integer"}
+                        }
+                      }
+                    }
+                  }
+                },
+                "400": {"description": "Twilio not configured"},
+                "401": {"description": "Unauthorized"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "twilio-voice",
+      "description": "Twilio webhook that returns TwiML for outbound calls. Validates signature and initiates call with recording.",
+      "files": ["supabase/functions/twilio-voice/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/twilio-voice": {
+            "post": {
+              "summary": "Handle Twilio voice webhook",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "AccountSid": {"type": "string"},
+                        "CallSid": {"type": "string"},
+                        "Caller": {"type": "string"},
+                        "To": {"type": "string"},
+                        "callRecordId": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "TwiML response",
+                  "content": {"text/xml": {}}
+                },
+                "403": {"description": "Invalid signature"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "recording-ready",
+      "description": "Twilio webhook that receives recording completion callbacks. Updates call record with recording URL.",
+      "files": ["supabase/functions/recording-ready/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/recording-ready": {
+            "post": {
+              "summary": "Handle recording completion callback",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "CallSid": {"type": "string"},
+                        "RecordingUrl": {"type": "string"},
+                        "RecordingSid": {"type": "string"},
+                        "RecordingDuration": {"type": "string"},
+                        "RecordingStatus": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Recording processed"},
+                "403": {"description": "Invalid signature"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "send-email",
+      "description": "Sends email to a lead via Gmail or Resend. Handles token refresh for Gmail. Rate limited to 50/minute.",
+      "files": ["supabase/functions/send-email/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/send-email": {
+            "post": {
+              "summary": "Send email to a lead",
+              "security": [{"bearerAuth": []}],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["leadId", "subject", "bodyHtml"],
+                      "properties": {
+                        "leadId": {"type": "string", "format": "uuid"},
+                        "subject": {"type": "string"},
+                        "bodyHtml": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Email sent"},
+                "400": {"description": "Missing fields or lead has no email"},
+                "401": {"description": "Unauthorized or token expired"},
+                "404": {"description": "Lead not found"},
+                "429": {"description": "Rate limit exceeded"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "start-scrape",
+      "description": "Starts a lead scraping job via Modal pipeline. Validates API keys and rate limits.",
+      "files": ["supabase/functions/start-scrape/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/start-scrape": {
+            "post": {
+              "summary": "Start a lead scraping job",
+              "security": [{"bearerAuth": []}],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["job_id", "niche", "location"],
+                      "properties": {
+                        "job_id": {"type": "string", "format": "uuid"},
+                        "niche": {"type": "string"},
+                        "location": {"type": "string"},
+                        "limit": {"type": "integer", "default": 50},
+                        "increase_radius": {"type": "boolean", "default": true}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Scraping started"},
+                "400": {"description": "API keys not configured or missing fields"},
+                "401": {"description": "Unauthorized"},
+                "404": {"description": "Job not found"},
+                "429": {"description": "Rate limit exceeded"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "stripe-webhook",
+      "description": "Handles Stripe subscription events (checkout, updates, cancellation, payment failures).",
+      "files": ["supabase/functions/stripe-webhook/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/stripe-webhook": {
+            "post": {
+              "summary": "Handle Stripe webhook events",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "type": {"type": "string"},
+                        "data": {"type": "object"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {"description": "Webhook received"},
+                "401": {"description": "Invalid signature"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "scrape-url",
+      "description": "Extracts business information from a company website URL using AI. Rate limited to 20/minute, with monthly limits for free users.",
+      "files": ["supabase/functions/scrape-url/index.ts"],
+      "api_doc": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/functions/v1/scrape-url": {
+            "post": {
+              "summary": "Extract business info from website URL",
+              "security": [{"bearerAuth": []}],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": ["url"],
+                      "properties": {
+                        "url": {"type": "string", "format": "uri"}
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Data extracted",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "success": {"type": "boolean"},
+                          "data": {
+                            "type": "object",
+                            "properties": {
+                              "companyName": {"type": "string"},
+                              "contactName": {"type": "string"},
+                              "email": {"type": "string"},
+                              "phone": {"type": "string"},
+                              "websiteUrl": {"type": "string"},
+                              "address": {"type": "string"},
+                              "location": {"type": "string"},
+                              "niche": {"type": "string"}
+                            }
+                          },
+                          "partialData": {"type": "boolean"}
+                        }
+                      }
+                    }
+                  }
+                },
+                "400": {"description": "Invalid URL"},
+                "401": {"description": "Unauthorized"},
+                "429": {"description": "Rate limit or monthly limit exceeded"}
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

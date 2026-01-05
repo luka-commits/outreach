@@ -30,8 +30,9 @@ export default defineConfig(({ mode }) => {
         }
       },
       build: {
-        // Generate source maps for production debugging
-        sourcemap: true,
+        // SECURITY: Disable source maps in production to prevent code exposure
+        // For debugging, upload source maps to Sentry instead
+        sourcemap: false,
         // Target modern browsers for smaller bundle
         target: 'es2020',
         // Chunk splitting for better caching

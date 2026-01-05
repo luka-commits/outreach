@@ -1,5 +1,24 @@
 
-export type LeadStatus = 'not_contacted' | 'in_progress' | 'replied' | 'qualified' | 'disqualified';
+export type LeadStatus = 'not_contacted' | 'in_progress' | 'replied' | 'qualified' | 'disqualified' | 'no_reply';
+
+export type LostReason =
+  | 'no_budget'
+  | 'bad_timing'
+  | 'went_with_competitor'
+  | 'not_interested'
+  | 'wrong_contact'
+  | 'no_response_after_outreach'
+  | 'other';
+
+export const LOST_REASON_LABELS: Record<LostReason, string> = {
+  no_budget: 'No Budget',
+  bad_timing: 'Bad Timing',
+  went_with_competitor: 'Went with Competitor',
+  not_interested: 'Not Interested',
+  wrong_contact: 'Wrong Contact',
+  no_response_after_outreach: 'No Response After Outreach',
+  other: 'Other',
+};
 
 export type TaskAction = 'send_dm' | 'send_email' | 'call' | 'fb_message' | 'linkedin_dm' | 'manual' | 'walk_in';
 
@@ -12,12 +31,25 @@ export interface StrategyStep {
 
 export type StrategyColor = 'indigo' | 'blue' | 'emerald' | 'rose' | 'amber' | 'violet' | 'pink' | 'sky';
 
+export interface ReplyFollowUp {
+  enabled: boolean;
+  delayHours: number;
+  template: string;
+}
+
 export interface Strategy {
   id: string;
   name: string;
   description: string;
   steps: StrategyStep[];
   color: StrategyColor;
+  // Reply sequence: multi-step follow-up triggered when lead replies
+  // Uses same StrategyStep structure, first step (dayOffset: 0) is immediate
+  replySequence?: StrategyStep[];
+  noReplyDelayDays?: number;  // Days after strategy completion before marking as no_reply
+  // Legacy reply follow-up (single task after reply)
+  replyFollowUp?: ReplyFollowUp;
+  position?: number;  // User-controlled ordering
 }
 
 export interface Lead {
@@ -60,8 +92,31 @@ export interface Lead {
   nextTaskNote?: string;
   status: LeadStatus;
 
+  // Lost Reason (only set when status = 'disqualified')
+  lostReason?: LostReason;
+  lostReasonNote?: string; // Custom note, primarily for 'other' reason
+
   // Activity Tracking
   lastActivityAt?: string; // ISO timestamp - denormalized from activities table
+
+  // Reply Sequence State (parallel to main strategy, triggered by reply)
+  replySequenceActive?: boolean;           // Is a reply sequence in progress?
+  replySequenceChannel?: TaskAction;       // Channel from original reply (all tasks use this)
+  replySequenceStepIndex?: number;         // Current step index in reply sequence
+  replySequenceCompletedIndexes?: number[]; // Completed step indexes for current day group
+  replySequenceNextDate?: string;          // Date when next reply sequence task should appear
+
+  // No-Reply Tracking
+  strategyCompletedAt?: string;          // ISO timestamp when strategy was completed
+
+  // Reply Follow-Up Task (legacy single follow-up after reply)
+  hasReplyFollowUp?: boolean;
+  replyFollowUpAction?: TaskAction;
+  replyFollowUpDate?: string;
+  replyFollowUpTemplate?: string;
+
+  // Tags (denormalized for display in list view)
+  tags?: Array<{ id: string; name: string; color: string }>;
 
   createdAt: string;
 }
@@ -355,6 +410,27 @@ export interface CustomFieldFilter {
   fieldId: string;
   operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'in';
   value: string;
+}
+
+// ============================================
+// Pipeline Preferences Types
+// ============================================
+
+export interface PipelinePreferences {
+  id: string;
+  visibleColumns: string[];
+  visibleCustomFields: string[];
+  columnOrder?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BuiltInColumn {
+  key: string;
+  label: string;
+  width: string;
+  defaultVisible: boolean;
+  required?: boolean;
 }
 
 // ============================================

@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse } from "../_shared/cors.ts"
-import { encrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
+import { encrypt, requireEncryption } from "../_shared/encryption.ts"
 
 /**
  * Edge function to save Twilio credentials with encryption.
@@ -61,19 +61,27 @@ serve(async (req) => {
       });
     }
 
-    // 5. Encrypt the auth token if encryption is configured
-    let authTokenToStore = authToken;
+    // 5. Encrypt the auth token (REQUIRED - never store in plaintext)
+    // SECURITY: Require encryption for credential storage
+    try {
+      requireEncryption();
+    } catch {
+      console.error('Encryption not configured');
+      return new Response(JSON.stringify({ error: 'Server configuration error. Please contact support.' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500,
+      });
+    }
 
-    if (isEncryptionConfigured()) {
-      try {
-        authTokenToStore = await encrypt(authToken);
-      } catch (encryptError) {
-        console.error('Encryption failed');
-        return new Response(JSON.stringify({ error: 'Failed to secure credentials' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 500,
-        });
-      }
+    let authTokenToStore: string;
+    try {
+      authTokenToStore = await encrypt(authToken);
+    } catch (encryptError) {
+      console.error('Encryption failed');
+      return new Response(JSON.stringify({ error: 'Failed to secure credentials' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500,
+      });
     }
 
     // 6. Store credentials in profiles table

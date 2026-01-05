@@ -27,9 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_leads_user_niche
 CREATE INDEX IF NOT EXISTS idx_leads_user_strategy
   ON leads(user_id, strategy_id);
 
--- Optimizes lead scoring and prioritization
-CREATE INDEX IF NOT EXISTS idx_leads_user_score
-  ON leads(user_id, score DESC NULLS LAST);
+-- NOTE: score column index removed - column doesn't exist in current schema
 
 -- Optimizes last activity sorting
 CREATE INDEX IF NOT EXISTS idx_leads_user_last_activity

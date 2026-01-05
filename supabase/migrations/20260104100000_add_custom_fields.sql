@@ -3,6 +3,15 @@
 -- User-defined custom fields with type-specific value storage
 -- =====================================================
 
+-- Ensure the updated_at trigger function exists (may have been dropped)
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = timezone('utc', now());
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- =====================================================
 -- TABLE 1: custom_field_definitions
 -- Stores the schema of user-defined custom fields
@@ -46,15 +55,19 @@ CREATE TABLE IF NOT EXISTS public.custom_field_definitions (
 ALTER TABLE public.custom_field_definitions ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies (standard 4-policy pattern)
+DROP POLICY IF EXISTS "Users can view own field definitions" ON custom_field_definitions;
 CREATE POLICY "Users can view own field definitions" ON custom_field_definitions
   FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own field definitions" ON custom_field_definitions;
 CREATE POLICY "Users can insert own field definitions" ON custom_field_definitions
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own field definitions" ON custom_field_definitions;
 CREATE POLICY "Users can update own field definitions" ON custom_field_definitions
   FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own field definitions" ON custom_field_definitions;
 CREATE POLICY "Users can delete own field definitions" ON custom_field_definitions
   FOR DELETE USING (auth.uid() = user_id);
 
@@ -94,15 +107,19 @@ CREATE TABLE IF NOT EXISTS public.custom_field_values (
 ALTER TABLE public.custom_field_values ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies (standard 4-policy pattern with direct user_id check)
+DROP POLICY IF EXISTS "Users can view own field values" ON custom_field_values;
 CREATE POLICY "Users can view own field values" ON custom_field_values
   FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own field values" ON custom_field_values;
 CREATE POLICY "Users can insert own field values" ON custom_field_values
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own field values" ON custom_field_values;
 CREATE POLICY "Users can update own field values" ON custom_field_values
   FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own field values" ON custom_field_values;
 CREATE POLICY "Users can delete own field values" ON custom_field_values
   FOR DELETE USING (auth.uid() = user_id);
 
@@ -136,11 +153,13 @@ CREATE INDEX IF NOT EXISTS idx_custom_field_values_boolean
 -- =====================================================
 
 -- Trigger for custom_field_definitions
+DROP TRIGGER IF EXISTS update_custom_field_definitions_updated_at ON public.custom_field_definitions;
 CREATE TRIGGER update_custom_field_definitions_updated_at
   BEFORE UPDATE ON public.custom_field_definitions
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- Trigger for custom_field_values
+DROP TRIGGER IF EXISTS update_custom_field_values_updated_at ON public.custom_field_values;
 CREATE TRIGGER update_custom_field_values_updated_at
   BEFORE UPDATE ON public.custom_field_values
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();

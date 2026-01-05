@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { X, Sparkles, Loader2, ChevronDown, ChevronUp, Check, AlertCircle } from 'lucide-react';
-import { ColumnMapping, ColumnMappingTarget, LeadField, LEAD_FIELD_LABELS } from '../types';
+import { ColumnMapping, ColumnMappingTarget, LeadField, LEAD_FIELD_LABELS, CustomFieldType } from '../types';
 import { detectColumnMappings } from '../services/geminiService';
-import { useCustomFieldDefinitionsQuery } from '../hooks/queries/useCustomFieldsQuery';
+import { useCustomFieldDefinitionsQuery, useCreateCustomFieldDefinition } from '../hooks/queries/useCustomFieldsQuery';
 import { useAuth } from '../hooks/useAuth';
+import { useToast } from './Toast';
+import { getErrorMessage } from '../utils/errorMessages';
 
 interface CSVColumnMapperProps {
   headers: string[];
@@ -14,6 +16,15 @@ interface CSVColumnMapperProps {
 }
 
 const ALL_LEAD_FIELDS: LeadField[] = Object.keys(LEAD_FIELD_LABELS) as LeadField[];
+
+// Simple field types for inline creation (excluding select types that require options)
+const SIMPLE_FIELD_TYPES: { value: CustomFieldType; label: string }[] = [
+  { value: 'text', label: 'Text' },
+  { value: 'number', label: 'Number' },
+  { value: 'date', label: 'Date' },
+  { value: 'url', label: 'URL' },
+  { value: 'checkbox', label: 'Checkbox' },
+];
 
 // Helper to check if target is company_name
 const isCompanyName = (target: ColumnMappingTarget | null): boolean => {
@@ -34,12 +45,20 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
   onBack,
 }) => {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const { data: customFields = [] } = useCustomFieldDefinitionsQuery(user?.id);
+  const createFieldMutation = useCreateCustomFieldDefinition(user?.id);
 
   const [mappings, setMappings] = useState<ColumnMapping[]>(initialMappings);
   const [isAIDetecting, setIsAIDetecting] = useState(false);
   const [aiError, setAIError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(true);
+
+  // Inline field creation state
+  const [creatingFieldForColumn, setCreatingFieldForColumn] = useState<number | null>(null);
+  const [newFieldName, setNewFieldName] = useState('');
+  const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text');
+  const [isCreatingField, setIsCreatingField] = useState(false);
 
   // Track which fields are already mapped (to disable in dropdowns)
   const usedTargets = useMemo(() => {
@@ -129,6 +148,48 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
 
   const handleConfirm = () => {
     onConfirm(mappings);
+  };
+
+  const handleCreateCustomField = async (csvIndex: number) => {
+    if (!newFieldName.trim()) return;
+
+    setIsCreatingField(true);
+    try {
+      const newField = await createFieldMutation.mutateAsync({
+        name: newFieldName.trim(),
+        fieldType: newFieldType,
+        isRequired: false,
+        showInList: false,
+        showInFilters: true,
+      });
+
+      // Auto-select new field for this column
+      if (newField?.id) {
+        setMappings(prev =>
+          prev.map(m =>
+            m.csvIndex === csvIndex
+              ? { ...m, target: { type: 'custom', fieldId: newField.id, fieldType: newFieldType }, source: 'manual' as const }
+              : m
+          )
+        );
+      }
+
+      // Reset state
+      setCreatingFieldForColumn(null);
+      setNewFieldName('');
+      setNewFieldType('text');
+    } catch (error) {
+      console.error('Failed to create custom field:', error);
+      showToast(getErrorMessage(error), 'error');
+    } finally {
+      setIsCreatingField(false);
+    }
+  };
+
+  const handleCancelFieldCreation = () => {
+    setCreatingFieldForColumn(null);
+    setNewFieldName('');
+    setNewFieldType('text');
   };
 
   // Get sample values for a column (first 2-3 non-empty values)
@@ -319,45 +380,97 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
                   {/* Arrow */}
                   <div className="text-slate-300 shrink-0">→</div>
 
-                  {/* Field Dropdown */}
-                  <div className="w-56 shrink-0">
-                    <select
-                      value={getDropdownValue(mapping.target)}
-                      onChange={e => handleTargetChange(mapping.csvIndex, e.target.value)}
-                      className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-                    >
-                      <option value="">Not mapped</option>
+                  {/* Field Dropdown / Inline Creation */}
+                  <div className="w-64 shrink-0">
+                    {creatingFieldForColumn === mapping.csvIndex ? (
+                      <div className="flex flex-col gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <input
+                          type="text"
+                          value={newFieldName}
+                          onChange={(e) => setNewFieldName(e.target.value)}
+                          placeholder="Field name..."
+                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleCreateCustomField(mapping.csvIndex);
+                            if (e.key === 'Escape') handleCancelFieldCreation();
+                          }}
+                        />
+                        <select
+                          value={newFieldType}
+                          onChange={(e) => setNewFieldType(e.target.value as CustomFieldType)}
+                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                        >
+                          {SIMPLE_FIELD_TYPES.map(t => (
+                            <option key={t.value} value={t.value}>{t.label}</option>
+                          ))}
+                        </select>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleCreateCustomField(mapping.csvIndex)}
+                            disabled={!newFieldName.trim() || isCreatingField}
+                            className="flex-1 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {isCreatingField ? 'Creating...' : 'Create'}
+                          </button>
+                          <button
+                            onClick={handleCancelFieldCreation}
+                            className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded hover:bg-slate-50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        value={getDropdownValue(mapping.target)}
+                        onChange={e => {
+                          if (e.target.value === '__create_new__') {
+                            setCreatingFieldForColumn(mapping.csvIndex);
+                          } else {
+                            handleTargetChange(mapping.csvIndex, e.target.value);
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-md border border-slate-200 text-sm bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                      >
+                        <option value="">Not mapped</option>
 
-                      {/* Built-in Fields */}
-                      <optgroup label="Standard Fields">
-                        {ALL_LEAD_FIELDS.map(field => {
-                          const key = `builtin:${field}`;
-                          const isUsed = usedTargets.has(key) && currentKey !== key;
-                          return (
-                            <option key={key} value={key} disabled={isUsed}>
-                              {LEAD_FIELD_LABELS[field]}
-                              {isUsed ? ' (in use)' : ''}
-                            </option>
-                          );
-                        })}
-                      </optgroup>
-
-                      {/* Custom Fields */}
-                      {customFields.length > 0 && (
-                        <optgroup label="Custom Fields">
-                          {customFields.map(field => {
-                            const key = `custom:${field.id}`;
+                        {/* Built-in Fields */}
+                        <optgroup label="Standard Fields">
+                          {ALL_LEAD_FIELDS.map(field => {
+                            const key = `builtin:${field}`;
                             const isUsed = usedTargets.has(key) && currentKey !== key;
                             return (
                               <option key={key} value={key} disabled={isUsed}>
-                                {field.name}
+                                {LEAD_FIELD_LABELS[field]}
                                 {isUsed ? ' (in use)' : ''}
                               </option>
                             );
                           })}
                         </optgroup>
-                      )}
-                    </select>
+
+                        {/* Custom Fields */}
+                        {customFields.length > 0 && (
+                          <optgroup label="Custom Fields">
+                            {customFields.map(field => {
+                              const key = `custom:${field.id}`;
+                              const isUsed = usedTargets.has(key) && currentKey !== key;
+                              return (
+                                <option key={key} value={key} disabled={isUsed}>
+                                  {field.name}
+                                  {isUsed ? ' (in use)' : ''}
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                        )}
+
+                        {/* Create New Field Action */}
+                        <optgroup label="Actions">
+                          <option value="__create_new__">+ Create new field</option>
+                        </optgroup>
+                      </select>
+                    )}
                   </div>
                 </div>
               );

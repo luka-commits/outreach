@@ -1,0 +1,52 @@
+[
+  {
+    "id": "TC001",
+    "title": "cancel-scrape-job",
+    "description": "Test cancelling a running scrape job with valid authentication and ownership. Verify 200 response on success, 401 for unauthorized access, and 404 if job not found or user lacks permission."
+  },
+  {
+    "id": "TC002",
+    "title": "scrape-callback-webhook-processing",
+    "description": "Test the scrape-callback webhook endpoint with valid and invalid webhook secrets. Verify processing of leads and job status updates. Expect 200 on success, 401 for invalid secret, and 404 if job not found."
+  },
+  {
+    "id": "TC003",
+    "title": "gmail-oauth-callback-token-exchange",
+    "description": "Test Gmail OAuth callback endpoint with valid authorization code exchange and encrypted token storage. Verify 200 on success, 400 on token exchange failure, and 401 for unauthorized requests."
+  },
+  {
+    "id": "TC004",
+    "title": "verify-twilio-multistep-verification",
+    "description": "Test Twilio verification endpoint for each step (credentials, twiml_app, phone_number) with valid and invalid inputs. Verify 200 on successful verification, 400 on failure, and 401 for unauthorized access."
+  },
+  {
+    "id": "TC005",
+    "title": "save-twilio-credentials-encryption",
+    "description": "Test saving Twilio credentials with all required fields. Verify credentials are encrypted before storage. Expect 200 on success, 400 if missing fields, and 401 if unauthorized."
+  },
+  {
+    "id": "TC006",
+    "title": "save-resend-api-key-encryption",
+    "description": "Test saving Resend API key with encryption. Verify 200 on success, 400 if API key is missing, and 401 for unauthorized requests."
+  },
+  {
+    "id": "TC007",
+    "title": "twilio-call-status-webhook",
+    "description": "Test Twilio call status webhook with valid and invalid Twilio signature. Verify call record updates on 200 response and 403 on invalid signature."
+  },
+  {
+    "id": "TC008",
+    "title": "generate-twilio-access-token",
+    "description": "Test Twilio token generation endpoint with valid authentication and configured Twilio credentials. Verify 200 with token data, 400 if Twilio not configured, and 401 if unauthorized."
+  },
+  {
+    "id": "TC009",
+    "title": "twilio-voice-webhook-response",
+    "description": "Test Twilio voice webhook endpoint with valid signature and call data. Verify TwiML response on 200 and 403 on invalid signature."
+  },
+  {
+    "id": "TC010",
+    "title": "recording-ready-webhook-processing",
+    "description": "Test Twilio recording-ready webhook with valid and invalid signatures. Verify call record updates with recording URL on 200 and 403 on invalid signature."
+  }
+]

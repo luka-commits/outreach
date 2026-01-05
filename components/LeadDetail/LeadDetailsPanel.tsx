@@ -8,7 +8,6 @@ import {
   Share2,
   Tag,
   Pencil,
-  Star,
   Sliders,
 } from 'lucide-react';
 import { Lead } from '../../types';
@@ -43,6 +42,23 @@ const LeadDetailsPanel: React.FC<LeadDetailsPanelProps> = memo(({ lead, onUpdate
   const handleFieldUpdate = useCallback(
     (field: keyof Lead, value: string) => {
       onUpdate({ ...lead, [field]: value || undefined });
+    },
+    [lead, onUpdate]
+  );
+
+  const handleNumberFieldUpdate = useCallback(
+    (field: 'googleRating' | 'googleReviewCount', value: string, min?: number, max?: number) => {
+      if (!value.trim()) {
+        onUpdate({ ...lead, [field]: undefined });
+        return;
+      }
+      let num = parseFloat(value);
+      if (isNaN(num)) return;
+      if (min !== undefined) num = Math.max(min, num);
+      if (max !== undefined) num = Math.min(max, num);
+      if (field === 'googleReviewCount') num = Math.floor(num);
+      if (field === 'googleRating') num = Math.round(num * 10) / 10;
+      onUpdate({ ...lead, [field]: num });
     },
     [lead, onUpdate]
   );
@@ -145,22 +161,22 @@ const LeadDetailsPanel: React.FC<LeadDetailsPanelProps> = memo(({ lead, onUpdate
               editable={isEditing}
               onSave={(val) => handleFieldUpdate('category', val)}
             />
-            {lead.googleRating && (
-              <div className="flex items-center justify-between py-1">
-                <span className="text-xs text-slate-500">Rating</span>
-                <div className="flex items-center gap-1.5">
-                  <Star size={14} className="text-amber-400 fill-amber-400" />
-                  <span className="text-sm font-bold text-slate-700">
-                    {lead.googleRating.toFixed(1)}
-                  </span>
-                  {lead.googleReviewCount && (
-                    <span className="text-xs text-slate-400">
-                      ({lead.googleReviewCount})
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
+            <DetailField
+              label="Rating"
+              value={lead.googleRating?.toString()}
+              placeholder="0.0 - 5.0"
+              editable={isEditing}
+              onSave={(val) => handleNumberFieldUpdate('googleRating', val, 0, 5)}
+              type="number"
+            />
+            <DetailField
+              label="Reviews"
+              value={lead.googleReviewCount?.toString()}
+              placeholder="Anzahl..."
+              editable={isEditing}
+              onSave={(val) => handleNumberFieldUpdate('googleReviewCount', val, 0)}
+              type="number"
+            />
           </div>
         </AccordionItem>
 
@@ -318,7 +334,7 @@ interface DetailFieldProps {
   placeholder?: string;
   editable: boolean;
   onSave: (value: string) => void;
-  type?: 'text' | 'url' | 'email' | 'tel';
+  type?: 'text' | 'url' | 'email' | 'tel' | 'number';
 }
 
 const DetailField: React.FC<DetailFieldProps> = ({
@@ -360,7 +376,8 @@ const DetailField: React.FC<DetailFieldProps> = ({
       <span className="text-xs text-slate-500 flex-shrink-0 w-20">{label}</span>
       {editable ? (
         <input
-          type={type}
+          type={type === 'number' ? 'text' : type}
+          inputMode={type === 'number' ? 'decimal' : undefined}
           value={localValue}
           onChange={(e) => setLocalValue(e.target.value)}
           onFocus={() => setIsFocused(true)}

@@ -15,15 +15,19 @@ CREATE TABLE IF NOT EXISTS lead_tags (
 ALTER TABLE lead_tags ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for lead_tags
+DROP POLICY IF EXISTS "Users can view own tags" ON lead_tags;
 CREATE POLICY "Users can view own tags" ON lead_tags
   FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own tags" ON lead_tags;
 CREATE POLICY "Users can insert own tags" ON lead_tags
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own tags" ON lead_tags;
 CREATE POLICY "Users can update own tags" ON lead_tags
   FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own tags" ON lead_tags;
 CREATE POLICY "Users can delete own tags" ON lead_tags
   FOR DELETE USING (auth.uid() = user_id);
 
@@ -43,6 +47,7 @@ ALTER TABLE lead_tag_assignments ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for lead_tag_assignments
 -- Users can only access assignments for tags they own
+DROP POLICY IF EXISTS "Users can view own tag assignments" ON lead_tag_assignments;
 CREATE POLICY "Users can view own tag assignments" ON lead_tag_assignments
   FOR SELECT USING (
     EXISTS (
@@ -52,6 +57,7 @@ CREATE POLICY "Users can view own tag assignments" ON lead_tag_assignments
     )
   );
 
+DROP POLICY IF EXISTS "Users can insert own tag assignments" ON lead_tag_assignments;
 CREATE POLICY "Users can insert own tag assignments" ON lead_tag_assignments
   FOR INSERT WITH CHECK (
     EXISTS (
@@ -61,6 +67,7 @@ CREATE POLICY "Users can insert own tag assignments" ON lead_tag_assignments
     )
   );
 
+DROP POLICY IF EXISTS "Users can delete own tag assignments" ON lead_tag_assignments;
 CREATE POLICY "Users can delete own tag assignments" ON lead_tag_assignments
   FOR DELETE USING (
     EXISTS (

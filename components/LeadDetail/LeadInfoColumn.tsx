@@ -46,6 +46,25 @@ const LeadInfoColumn: React.FC<LeadInfoColumnProps> = memo(({
     [lead, onUpdate]
   );
 
+  const handleNumberFieldUpdate = useCallback(
+    (field: 'googleRating' | 'googleReviewCount', value: string) => {
+      if (!value.trim()) {
+        onUpdate({ ...lead, [field]: undefined });
+        return;
+      }
+      let num = parseFloat(value);
+      if (isNaN(num)) return;
+      if (field === 'googleRating') {
+        num = Math.max(0, Math.min(5, num));
+        num = Math.round(num * 10) / 10;
+      } else {
+        num = Math.max(0, Math.floor(num));
+      }
+      onUpdate({ ...lead, [field]: num });
+    },
+    [lead, onUpdate]
+  );
+
   const handleCopy = useCallback(async (value: string, field: string) => {
     await navigator.clipboard.writeText(value);
     setCopiedField(field);
@@ -111,27 +130,68 @@ const LeadInfoColumn: React.FC<LeadInfoColumnProps> = memo(({
           ID: {lead.id.slice(0, 8)}
         </span>
 
-        {lead.googleRating && (
-          <span className="flex items-center gap-1.5">
-            <Star size={14} className="text-amber-400 fill-amber-400" />
-            <span className="font-medium text-slate-700">{lead.googleRating.toFixed(1)}</span>
-            {lead.googleReviewCount && (
-              <span className="text-slate-400">({lead.googleReviewCount})</span>
-            )}
+        {/* Rating - Editable */}
+        <button
+          onClick={() => {
+            const rating = prompt('Google Rating (0-5):', lead.googleRating?.toString() ?? '');
+            if (rating !== null) handleNumberFieldUpdate('googleRating', rating);
+          }}
+          className="flex items-center gap-1.5 hover:bg-slate-100 px-2 py-0.5 rounded-md transition-colors group"
+          title="Click to edit rating"
+        >
+          <Star size={14} className={lead.googleRating ? 'text-amber-400 fill-amber-400' : 'text-slate-300'} />
+          <span className={lead.googleRating ? 'font-medium text-slate-700' : 'text-slate-400'}>
+            {lead.googleRating?.toFixed(1) ?? '-'}
           </span>
-        )}
-        {lead.location && (
-          <span className="flex items-center gap-1.5">
-            <MapPin size={14} className="text-slate-400" />
-            {lead.location}
+          <span className="text-slate-400">
+            ({lead.googleReviewCount ?? 0})
           </span>
-        )}
-        {lead.niche && (
-          <span className="flex items-center gap-1.5">
-            <Briefcase size={14} className="text-slate-400" />
-            {lead.niche}
+          <Pencil size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
+
+        {/* Review Count - Editable (separate button) */}
+        <button
+          onClick={() => {
+            const count = prompt('Number of reviews:', lead.googleReviewCount?.toString() ?? '');
+            if (count !== null) handleNumberFieldUpdate('googleReviewCount', count);
+          }}
+          className="text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-100 px-1.5 py-0.5 rounded transition-colors"
+          title="Click to edit review count"
+        >
+          Edit reviews
+        </button>
+
+        {/* Location - Editable */}
+        <button
+          onClick={() => {
+            const location = prompt('Location:', lead.location ?? '');
+            if (location !== null) handleFieldUpdate('location', location);
+          }}
+          className="flex items-center gap-1.5 hover:bg-slate-100 px-2 py-0.5 rounded-md transition-colors group"
+          title="Click to edit location"
+        >
+          <MapPin size={14} className="text-slate-400" />
+          <span className={lead.location ? 'text-slate-600' : 'text-slate-400'}>
+            {lead.location || 'Add location'}
           </span>
-        )}
+          <Pencil size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
+
+        {/* Niche - Editable */}
+        <button
+          onClick={() => {
+            const niche = prompt('Niche/Industry:', lead.niche ?? '');
+            if (niche !== null) handleFieldUpdate('niche', niche);
+          }}
+          className="flex items-center gap-1.5 hover:bg-slate-100 px-2 py-0.5 rounded-md transition-colors group"
+          title="Click to edit niche"
+        >
+          <Briefcase size={14} className="text-slate-400" />
+          <span className={lead.niche ? 'text-slate-600' : 'text-slate-400'}>
+            {lead.niche || 'Add niche'}
+          </span>
+          <Pencil size={10} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
       </div>
 
       {/* Contact: Phone - Prominent Call Button */}

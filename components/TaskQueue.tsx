@@ -3,16 +3,46 @@ import {
   Check, Copy, ExternalLink, Instagram, Mail,
   Facebook, Sparkles, Loader2, Linkedin, List, ChevronRight,
   PlayCircle, Calendar as CalendarIcon, ChevronLeft, CheckSquare, Trash2,
-  MessageSquare, PhoneCall, Filter, Clock, User, History, X, Menu
+  MessageSquare, PhoneCall, Filter, Clock, User, History, X, Menu, Reply,
+  MapPin, Briefcase, Globe, Star
 } from 'lucide-react';
-import { Lead, Strategy, Activity, CallOutcome, StrategyStep } from '../types';
+import { Lead, Strategy, Activity, CallOutcome, StrategyStep, TaskAction } from '../types';
 import { ACTION_ICONS } from '../constants';
 import { generatePersonalizedMessage } from '../services/geminiService';
 import { getPlatformColor, getStrategyColor } from '../utils/styles';
 import { substituteTemplateVariables } from '../utils/templateUtils';
 import CallProcessingPanel from './CallProcessingPanel';
 import EmailSendPanel from './EmailSendPanel';
+import InlineSocialUrlEditor from './InlineSocialUrlEditor';
 import { useUnifiedTimeline, TimelineItem } from '../hooks/queries/useUnifiedTimeline';
+import { advanceReplySequence, getActionLabel } from '../services/supabase';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../lib/queryClient';
+
+// Helper to check if a lead has a pending reply sequence task
+const isReplySequenceTask = (lead: Lead): boolean => {
+  return lead.replySequenceActive === true;
+};
+
+// Helper to get reply sequence action (channel) for a lead
+const getReplySequenceAction = (lead: Lead): TaskAction | undefined => {
+  return lead.replySequenceChannel;
+};
+
+// Helper to get current reply sequence step for a lead
+const getReplySequenceStep = (lead: Lead, strategy: Strategy | null | undefined): StrategyStep | null => {
+  if (!strategy?.replySequence || lead.replySequenceStepIndex === undefined) return null;
+  return strategy.replySequence[lead.replySequenceStepIndex] || null;
+};
+
+// Helper to get the effective task date for a lead (considers both regular tasks and reply sequences)
+const getEffectiveTaskDate = (lead: Lead): string | undefined => {
+  // Reply sequences have their own date
+  if (isReplySequenceTask(lead)) {
+    return lead.replySequenceNextDate;
+  }
+  return lead.nextTaskDate;
+};
 
 // Interface for grouped tasks (multiple tasks per day for one lead)
 interface PendingStep {
@@ -91,6 +121,7 @@ type TaskTypeFilter = 'all' | 'dm' | 'call' | 'email';
 import ConfirmModal from './ConfirmModal';
 import RescheduleModal from './RescheduleModal';
 import { useToast } from './Toast';
+import { useAuth } from '../hooks/useAuth';
 
 // Helper to format relative time
 const formatRelativeTime = (timestamp: string): string => {
@@ -115,6 +146,8 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
   const [taskTypeFilter, setTaskTypeFilter] = useState<TaskTypeFilter>('all');
   const [isSessionMode, setIsSessionMode] = useState(false);
   const { showToast } = useToast();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   // Processing State
   const [processLeadId, setProcessLeadId] = useState<string | null>(null);
@@ -146,6 +179,9 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     }
     return false;
   });
+
+  // Inline editing state for task cards
+  const [editingField, setEditingField] = useState<string | null>(null);
 
   // Fetch activities for current lead in processing mode
   const { data: leadTimeline = [], isLoading: timelineLoading } = useUnifiedTimeline(processLeadId ?? undefined);
@@ -184,16 +220,28 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     let emailCount = 0;
 
     // Filter out tasks without dates first, then sort
+    // Include both regular tasks (nextTaskDate) and reply sequences (replySequenceNextDate)
     const sortedTasks = [...allScheduledTasks]
-      .filter(t => t.nextTaskDate)
-      .sort((a, b) => new Date(a.nextTaskDate!).getTime() - new Date(b.nextTaskDate!).getTime());
+      .filter(t => t.nextTaskDate || isReplySequenceTask(t))
+      .sort((a, b) => {
+        const dateA = getEffectiveTaskDate(a);
+        const dateB = getEffectiveTaskDate(b);
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+        return new Date(dateA).getTime() - new Date(dateB).getTime();
+      });
 
     sortedTasks.forEach(task => {
-      if (!task.nextTaskDate) return;
-      const taskDate = new Date(task.nextTaskDate);
+      const effectiveDate = getEffectiveTaskDate(task);
+      if (!effectiveDate) return;
+      const taskDate = new Date(effectiveDate);
       taskDate.setHours(0, 0, 0, 0);
 
-      if (taskDate < today && task.status !== 'replied' && task.status !== 'qualified' && task.status !== 'disqualified') {
+      // Reply follow-ups don't check terminal status - they have their own completion flow
+      const isFollowUp = isReplySequenceTask(task);
+      const isTerminal = !isFollowUp && (task.status === 'replied' || task.status === 'qualified' || task.status === 'disqualified');
+
+      if (taskDate < today && !isTerminal) {
         overdueCount++;
       } else if (taskDate.getTime() === today.getTime()) {
         todayCount++;
@@ -204,17 +252,23 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
 
     // For session mode, we want Overdue + Today
     const sessionTasksList = sortedTasks.filter(task => {
-      if (!task.nextTaskDate) return false;
-      const taskDate = new Date(task.nextTaskDate);
+      const effectiveDate = getEffectiveTaskDate(task);
+      if (!effectiveDate) return false;
+      const taskDate = new Date(effectiveDate);
       taskDate.setHours(0, 0, 0, 0);
-      return taskDate <= today && task.status !== 'replied' && task.status !== 'qualified' && task.status !== 'disqualified';
+      const isFollowUp = isReplySequenceTask(task);
+      const isTerminal = !isFollowUp && (task.status === 'replied' || task.status === 'qualified' || task.status === 'disqualified');
+      return taskDate <= today && !isTerminal;
     });
 
     // First filter by date
     const dateFiltered = sortedTasks.filter(task => {
-      if (!task.nextTaskDate) return false;
-      const taskDate = new Date(task.nextTaskDate);
+      const effectiveDate = getEffectiveTaskDate(task);
+      if (!effectiveDate) return false;
+      const taskDate = new Date(effectiveDate);
       taskDate.setHours(0, 0, 0, 0);
+      const isFollowUp = isReplySequenceTask(task);
+      const isTerminal = !isFollowUp && (task.status === 'replied' || task.status === 'qualified' || task.status === 'disqualified');
 
       if (activeFilter === 'specific' && specificDate) {
         const targetDate = new Date(specificDate);
@@ -222,7 +276,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
         return taskDate.getTime() === targetDate.getTime();
       }
       if (activeFilter === 'overdue') {
-        return taskDate < today && task.status !== 'replied' && task.status !== 'qualified' && task.status !== 'disqualified';
+        return taskDate < today && !isTerminal;
       }
       if (activeFilter === 'today') {
         return taskDate.getTime() === today.getTime();
@@ -236,13 +290,32 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     // Count task types within the date filter
     dateFiltered.forEach(task => {
       allCount++;
-      if (matchesTaskTypeFilter(task, 'dm')) dmCount++;
-      if (matchesTaskTypeFilter(task, 'call')) callCount++;
-      if (matchesTaskTypeFilter(task, 'email')) emailCount++;
+      // Reply sequences match based on their channel (replySequenceChannel)
+      if (isReplySequenceTask(task)) {
+        const action = getReplySequenceAction(task);
+        if (action && ['send_dm', 'fb_message', 'linkedin_dm'].includes(action)) dmCount++;
+        if (action === 'call') callCount++;
+        if (action === 'send_email') emailCount++;
+      } else {
+        if (matchesTaskTypeFilter(task, 'dm')) dmCount++;
+        if (matchesTaskTypeFilter(task, 'call')) callCount++;
+        if (matchesTaskTypeFilter(task, 'email')) emailCount++;
+      }
     });
 
     // Then filter by task type
-    const filtered = dateFiltered.filter(task => matchesTaskTypeFilter(task, taskTypeFilter));
+    const filtered = dateFiltered.filter(task => {
+      if (isReplySequenceTask(task)) {
+        if (taskTypeFilter === 'all') return true;
+        const action = getReplySequenceAction(task);
+        if (!action) return false;
+        if (taskTypeFilter === 'dm') return ['send_dm', 'fb_message', 'linkedin_dm'].includes(action);
+        if (taskTypeFilter === 'call') return action === 'call';
+        if (taskTypeFilter === 'email') return action === 'send_email';
+        return true;
+      }
+      return matchesTaskTypeFilter(task, taskTypeFilter);
+    });
 
     return {
       filteredTasks: filtered,
@@ -279,12 +352,21 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
   const step = strategy ? strategy.steps[activeStepIndex] : null;
 
   useEffect(() => {
-    if (currentLead && step) {
-      const template = substituteTemplateVariables(step.template, currentLead);
-      setMessage(template);
+    if (currentLead) {
+      // Check if this is a reply sequence task
+      if (isReplySequenceTask(currentLead)) {
+        const replyStep = getReplySequenceStep(currentLead, strategy);
+        if (replyStep) {
+          const template = substituteTemplateVariables(replyStep.template, currentLead);
+          setMessage(template);
+        }
+      } else if (step) {
+        const template = substituteTemplateVariables(step.template, currentLead);
+        setMessage(template);
+      }
     }
     setCopied(false);
-  }, [processLeadId, currentLead, step, activeStepIndex]);
+  }, [processLeadId, currentLead, step, activeStepIndex, strategy]);
 
   const handlePersonalize = async () => {
     if (!currentLead || !step) return;
@@ -312,8 +394,47 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     return undefined;
   };
 
-  const handleCompleteTask = () => {
+  const handleCompleteTask = async () => {
     if (!currentLead) return;
+
+    // Handle Reply Sequence Task
+    if (isReplySequenceTask(currentLead) && strategy?.replySequence) {
+      const replySequenceChannel = getReplySequenceAction(currentLead) || 'manual';
+      const platform = getPlatformFromAction(replySequenceChannel);
+      const currentStepIndex = currentLead.replySequenceStepIndex ?? 0;
+      const completedIndexes = currentLead.replySequenceCompletedIndexes || [];
+      const totalSteps = strategy.replySequence.length;
+
+      try {
+        // Advance the reply sequence to next step
+        await advanceReplySequence(
+          currentLead.id,
+          user?.id || '',
+          currentStepIndex,
+          completedIndexes,
+          strategy
+        );
+
+        // Invalidate task queries since advanceReplySequence updates DB directly
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks(user?.id) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasksAllScheduled(user?.id) });
+
+        const stepNum = currentStepIndex + 1;
+        onAddActivity(currentLead.id, `Reply sequence step ${stepNum}/${totalSteps} completed`, message, false, platform);
+
+        // Check if this was the last step
+        if (stepNum >= totalSteps) {
+          showToast('Reply sequence completed!', 'success');
+        } else {
+          showToast(`Reply sequence step ${stepNum}/${totalSteps} completed`, 'success');
+        }
+        advanceToNextLeadOrClose();
+      } catch (err) {
+        console.error('Failed to advance reply sequence:', err);
+        showToast('Failed to complete reply sequence step', 'error');
+      }
+      return;
+    }
 
     // Handle Manual/No-Strategy Case
     if (!strategy || !step) {
@@ -554,15 +675,35 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     if (!taskToDelete) return;
 
     const lead = allScheduledTasks.find(l => l.id === taskToDelete);
-    if (!lead) return;
+    if (!lead) {
+      console.error('Lead not found for deletion:', taskToDelete);
+      return;
+    }
 
-    // Clear nextTaskDate to remove from queue
+    // Check if this is a reply follow-up task or a regular task
+    const isFollowUp = isReplySequenceTask(lead);
+
+    // Clear the appropriate fields based on task type
     const updatedLead: Lead = {
       ...lead,
-      nextTaskDate: undefined
+      ...(isFollowUp
+        ? {
+            // Clear reply sequence fields to remove follow-up from queue
+            replySequenceActive: false,
+            replySequenceNextDate: undefined,
+          }
+        : {
+            // Clear nextTaskDate to remove regular task from queue
+            nextTaskDate: undefined,
+          }),
     };
 
     onUpdateLead(updatedLead);
+
+    // Force invalidate task queries to refresh the list immediately
+    queryClient.invalidateQueries({ queryKey: queryKeys.tasks(user?.id) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.tasksAllScheduled(user?.id) });
+
     showToast('Task removed from queue', 'success');
   };
 
@@ -727,18 +868,34 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
   };
 
   if (viewMode === 'processing' && currentLead) {
+    // Check if this is a reply sequence task
+    const isFollowUpTask = isReplySequenceTask(currentLead);
+    const replySequenceChannel = getReplySequenceAction(currentLead);
+
     // Fallback for manual tasks or missing strategy
-    const hasStrategy = !!strategy && !!step;
-    const displayAction = hasStrategy ? step!.action : 'manual';
-    const displayActionLabel = hasStrategy ? step!.action.replace('_', ' ') : 'Manual Task';
-    const displayStrategyName = strategy?.name || 'Manual';
+    const hasStrategy = !isFollowUpTask && !!strategy && !!step;
+    const displayAction = isFollowUpTask
+      ? (replySequenceChannel || 'manual')
+      : (hasStrategy ? step!.action : 'manual');
+    const displayActionLabel = isFollowUpTask
+      ? getActionLabel(replySequenceChannel || 'manual')
+      : (hasStrategy ? step!.action.replace('_', ' ') : 'Manual Task');
+
+    // Show reply sequence step progress
+    const replySeqStep = isFollowUpTask ? (currentLead.replySequenceStepIndex ?? 0) + 1 : 0;
+    const replySeqTotal = isFollowUpTask && strategy?.replySequence ? strategy.replySequence.length : 0;
+    const displayStrategyName = isFollowUpTask
+      ? `Reply Sequence (${replySeqStep}/${replySeqTotal})`
+      : (strategy?.name || 'Manual');
     const totalSteps = strategy?.steps.length || 1;
-    const progressPercent = strategy ? ((currentLead.currentStepIndex + 1) / totalSteps) * 100 : 100;
+    const progressPercent = isFollowUpTask
+      ? (replySeqTotal > 0 ? (replySeqStep / replySeqTotal) * 100 : 100)
+      : (strategy ? ((currentLead.currentStepIndex + 1) / totalSteps) * 100 : 100);
 
     // Check if this is a call task
-    const isCallTask = hasStrategy && step!.action === 'call';
+    const isCallTask = (isFollowUpTask && replySequenceChannel === 'call') || (hasStrategy && step!.action === 'call');
     // Check if this is an email task
-    const isEmailTask = hasStrategy && step!.action === 'send_email';
+    const isEmailTask = (isFollowUpTask && replySequenceChannel === 'send_email') || (hasStrategy && step!.action === 'send_email');
 
     // Reusable processing header component
     const ProcessingHeader = () => (
@@ -1063,6 +1220,22 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
                 }}
                 onComplete={handleCompleteTask}
               />
+
+              {/* Skip / Mark Done buttons */}
+              <div className="pt-4 flex gap-4">
+                <button onClick={() => {
+                  if (isSessionMode) {
+                    const nextTask = tasksToNavigate[currentTaskIndex + 1];
+                    if (nextTask) setProcessLeadId(nextTask.id);
+                    else { setIsSessionMode(false); setViewMode('list'); }
+                  } else { setViewMode('list'); }
+                }} className="flex-1 py-5 rounded-[1.5rem] bg-slate-50 text-slate-500 font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-2 border border-slate-200">
+                  {isSessionMode ? 'Skip' : 'Skip for now'}
+                </button>
+                <button onClick={handleCompleteTask} className="flex-[2] py-5 rounded-[1.5rem] bg-emerald-500 text-white font-black hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-900/20 flex items-center justify-center gap-2">
+                  <Check size={20} strokeWidth={3} /> {isSessionMode ? 'Next Task' : 'Mark Done'}
+                </button>
+              </div>
             </div>
           </div>
         </>
@@ -1135,6 +1308,207 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
                   </div>
                 </div>
               )}
+
+              {/* Business Info Row */}
+              <div className="flex items-center justify-center gap-3 flex-wrap mt-4 text-xs text-slate-500">
+                {/* Location */}
+                {editingField === 'location' ? (
+                  <div className="flex items-center gap-1">
+                    <MapPin size={12} className="text-slate-400" />
+                    <input
+                      type="text"
+                      autoFocus
+                      defaultValue={currentLead.location || ''}
+                      placeholder="City, State"
+                      className="w-28 px-2 py-1 border border-indigo-300 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        if (value !== (currentLead.location || '')) {
+                          onUpdateLead({ ...currentLead, location: value || undefined });
+                        }
+                        setEditingField(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        if (e.key === 'Escape') setEditingField(null);
+                      }}
+                    />
+                  </div>
+                ) : currentLead.location ? (
+                  <button
+                    onClick={() => setEditingField('location')}
+                    className="flex items-center gap-1 hover:text-indigo-600 transition-colors"
+                  >
+                    <MapPin size={12} />
+                    {currentLead.location}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setEditingField('location')}
+                    className="flex items-center gap-1 px-2 py-1 rounded border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-500 transition-all"
+                  >
+                    <MapPin size={12} />
+                    <span>Add location</span>
+                  </button>
+                )}
+
+                <span className="text-slate-300">•</span>
+
+                {/* Niche */}
+                {editingField === 'niche' ? (
+                  <div className="flex items-center gap-1">
+                    <Briefcase size={12} className="text-slate-400" />
+                    <input
+                      type="text"
+                      autoFocus
+                      defaultValue={currentLead.niche || ''}
+                      placeholder="Industry"
+                      className="w-28 px-2 py-1 border border-indigo-300 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        if (value !== (currentLead.niche || '')) {
+                          onUpdateLead({ ...currentLead, niche: value || undefined });
+                        }
+                        setEditingField(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        if (e.key === 'Escape') setEditingField(null);
+                      }}
+                    />
+                  </div>
+                ) : currentLead.niche ? (
+                  <button
+                    onClick={() => setEditingField('niche')}
+                    className="flex items-center gap-1 hover:text-indigo-600 transition-colors"
+                  >
+                    <Briefcase size={12} />
+                    {currentLead.niche.split(',')[0]?.trim()}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setEditingField('niche')}
+                    className="flex items-center gap-1 px-2 py-1 rounded border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-500 transition-all"
+                  >
+                    <Briefcase size={12} />
+                    <span>Add niche</span>
+                  </button>
+                )}
+
+                <span className="text-slate-300">•</span>
+
+                {/* Contact Name */}
+                {editingField === 'contact' ? (
+                  <div className="flex items-center gap-1">
+                    <User size={12} className="text-slate-400" />
+                    <input
+                      type="text"
+                      autoFocus
+                      defaultValue={currentLead.contactName || ''}
+                      placeholder="Contact name"
+                      className="w-28 px-2 py-1 border border-indigo-300 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        if (value !== (currentLead.contactName || '')) {
+                          onUpdateLead({ ...currentLead, contactName: value || undefined });
+                        }
+                        setEditingField(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        if (e.key === 'Escape') setEditingField(null);
+                      }}
+                    />
+                  </div>
+                ) : currentLead.contactName ? (
+                  <button
+                    onClick={() => setEditingField('contact')}
+                    className="flex items-center gap-1 hover:text-indigo-600 transition-colors"
+                  >
+                    <User size={12} />
+                    {currentLead.contactName}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setEditingField('contact')}
+                    className="flex items-center gap-1 px-2 py-1 rounded border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-500 transition-all"
+                  >
+                    <User size={12} />
+                    <span>Add contact</span>
+                  </button>
+                )}
+
+                <span className="text-slate-300">•</span>
+
+                {/* Rating (display only) */}
+                <span className="flex items-center gap-1">
+                  <Star size={12} className={currentLead.googleRating ? 'text-amber-400 fill-amber-400' : 'text-slate-300'} />
+                  <span className={currentLead.googleRating ? 'text-slate-600 font-medium' : 'text-slate-400'}>
+                    {currentLead.googleRating ? currentLead.googleRating.toFixed(1) : '-'}
+                  </span>
+                  {currentLead.googleReviewCount !== undefined && (
+                    <span className="text-slate-400">({currentLead.googleReviewCount})</span>
+                  )}
+                </span>
+              </div>
+
+              {/* Website & Social URL Row */}
+              <div className="flex items-center justify-center gap-3 flex-wrap mt-2 text-xs">
+                {/* Website */}
+                {editingField === 'website' ? (
+                  <div className="flex items-center gap-1">
+                    <Globe size={12} className="text-slate-400" />
+                    <input
+                      type="url"
+                      autoFocus
+                      defaultValue={currentLead.websiteUrl || ''}
+                      placeholder="https://..."
+                      className="w-36 px-2 py-1 border border-indigo-300 rounded text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        if (value !== (currentLead.websiteUrl || '')) {
+                          onUpdateLead({ ...currentLead, websiteUrl: value || undefined });
+                        }
+                        setEditingField(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        if (e.key === 'Escape') setEditingField(null);
+                      }}
+                    />
+                  </div>
+                ) : currentLead.websiteUrl ? (
+                  <a
+                    href={currentLead.websiteUrl.startsWith('http') ? currentLead.websiteUrl : `https://${currentLead.websiteUrl}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-slate-500 hover:text-indigo-600 transition-colors"
+                  >
+                    <Globe size={12} />
+                    {currentLead.websiteUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => setEditingField('website')}
+                    className="flex items-center gap-1 px-2 py-1 rounded border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-500 transition-all"
+                  >
+                    <Globe size={12} />
+                    <span>Add website</span>
+                  </button>
+                )}
+
+                <span className="text-slate-300">•</span>
+
+                {/* Social URL for current action */}
+                <InlineSocialUrlEditor
+                  lead={currentLead}
+                  action={displayAction}
+                  onUpdateLead={(updates) => onUpdateLead({ ...currentLead, ...updates })}
+                  isEditing={editingField === 'social'}
+                  onStartEdit={() => setEditingField('social')}
+                  onCancelEdit={() => setEditingField(null)}
+                />
+              </div>
             </div>
 
             {/* Recent activities */}
@@ -1166,10 +1540,58 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
               {/* Render actions only if defined in step, otherwise show generic 'Mark Complete' */}
               {hasStrategy ? (
                 <>
-                  {step!.action === 'send_dm' && <ActionButton icon={<Instagram />} label="Open Instagram" href={currentLead.instagramUrl} color="bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white" />}
-                  {step!.action === 'linkedin_dm' && <ActionButton icon={<Linkedin />} label="Open LinkedIn" href={currentLead.linkedinUrl} color="bg-[#0A66C2] text-white" />}
-                  {step!.action === 'send_email' && <ActionButton icon={<Mail />} label="Open Email" href={currentLead.email ? `mailto:${currentLead.email}?subject=Inquiry&body=${encodeURIComponent(displayMessage)}` : undefined} color="bg-[#EA4335] text-white" />}
-                  {step!.action === 'fb_message' && <ActionButton icon={<Facebook />} label="Open Facebook" href={currentLead.facebookUrl} color="bg-[#1877F2] text-white" />}
+                  {step!.action === 'send_dm' && (
+                    currentLead.instagramUrl ? (
+                      <ActionButton icon={<Instagram />} label="Open Instagram" href={currentLead.instagramUrl} color="bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white" />
+                    ) : (
+                      <button
+                        onClick={() => setEditingField('social')}
+                        className="flex items-center justify-center gap-3 py-5 rounded-[1.5rem] bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white font-black text-lg border-2 border-dashed border-white/30 hover:opacity-90 transition-all"
+                      >
+                        <Instagram size={24} />
+                        Add Instagram URL
+                      </button>
+                    )
+                  )}
+                  {step!.action === 'linkedin_dm' && (
+                    currentLead.linkedinUrl ? (
+                      <ActionButton icon={<Linkedin />} label="Open LinkedIn" href={currentLead.linkedinUrl} color="bg-[#0A66C2] text-white" />
+                    ) : (
+                      <button
+                        onClick={() => setEditingField('social')}
+                        className="flex items-center justify-center gap-3 py-5 rounded-[1.5rem] bg-[#0A66C2] text-white font-black text-lg border-2 border-dashed border-white/30 hover:opacity-90 transition-all"
+                      >
+                        <Linkedin size={24} />
+                        Add LinkedIn URL
+                      </button>
+                    )
+                  )}
+                  {step!.action === 'send_email' && (
+                    currentLead.email ? (
+                      <ActionButton icon={<Mail />} label="Open Email" href={`mailto:${currentLead.email}?subject=Inquiry&body=${encodeURIComponent(displayMessage)}`} color="bg-[#EA4335] text-white" />
+                    ) : (
+                      <button
+                        onClick={() => setEditingField('social')}
+                        className="flex items-center justify-center gap-3 py-5 rounded-[1.5rem] bg-[#EA4335] text-white font-black text-lg border-2 border-dashed border-white/30 hover:opacity-90 transition-all"
+                      >
+                        <Mail size={24} />
+                        Add Email Address
+                      </button>
+                    )
+                  )}
+                  {step!.action === 'fb_message' && (
+                    currentLead.facebookUrl ? (
+                      <ActionButton icon={<Facebook />} label="Open Facebook" href={currentLead.facebookUrl} color="bg-[#1877F2] text-white" />
+                    ) : (
+                      <button
+                        onClick={() => setEditingField('social')}
+                        className="flex items-center justify-center gap-3 py-5 rounded-[1.5rem] bg-[#1877F2] text-white font-black text-lg border-2 border-dashed border-white/30 hover:opacity-90 transition-all"
+                      >
+                        <Facebook size={24} />
+                        Add Facebook URL
+                      </button>
+                    )
+                  )}
                 </>
               ) : (
                 <div className="p-4 bg-slate-50 rounded-2xl text-center text-slate-500 text-sm font-medium">
@@ -1294,15 +1716,22 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
           {filteredTasks.length > 0 ? (
             <div className="divide-y divide-slate-100">
               {filteredTasks.map((task) => {
+                const isFollowUp = isReplySequenceTask(task);
                 const taskGroup = createTaskGroup(task, strategies);
                 const taskStrategy = taskGroup.strategy;
-                const hasMultipleTasks = taskGroup.totalStepsToday > 1;
+                const hasMultipleTasks = !isFollowUp && taskGroup.totalStepsToday > 1;
                 const pendingCount = taskGroup.totalStepsToday - taskGroup.completedStepsToday;
-                const taskStrategyColor = getStrategyColor(taskStrategy?.color);
+                const taskStrategyColor = isFollowUp
+                  ? { text: 'text-emerald-600', bg: 'bg-emerald-50', solid: 'bg-emerald-500' }
+                  : getStrategyColor(taskStrategy?.color);
 
-                // Calculate simple status text
-                const isOverdue = new Date(task.nextTaskDate!).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
-                const isToday = new Date(task.nextTaskDate!).setHours(0, 0, 0, 0) === new Date().setHours(0, 0, 0, 0);
+                // Calculate simple status text using effective date
+                const effectiveDate = getEffectiveTaskDate(task);
+                const isOverdue = effectiveDate && new Date(effectiveDate).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
+                const isToday = effectiveDate && new Date(effectiveDate).setHours(0, 0, 0, 0) === new Date().setHours(0, 0, 0, 0);
+
+                // Get display info for reply sequences
+                const followUpAction = isFollowUp ? (getReplySequenceAction(task) || 'manual') : null;
 
                 return (
                   <div
@@ -1315,7 +1744,12 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
                       className="p-6 flex items-center justify-between gap-4"
                     >
                       <div className="flex items-center gap-6">
-                        {hasMultipleTasks ? (
+                        {isFollowUp ? (
+                          // Reply follow-up task icon
+                          <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-emerald-100 text-emerald-600 border border-emerald-200">
+                            <Reply size={20} />
+                          </div>
+                        ) : hasMultipleTasks ? (
                           // Multi-task icon: stacked icons
                           <div className="relative w-12 h-12 flex-shrink-0">
                             <div className="flex -space-x-2">
@@ -1356,7 +1790,16 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
                         <div>
                           <h4 className="font-bold text-slate-900 text-lg group-hover:text-indigo-700 transition-colors">{task.companyName}</h4>
                           <div className="flex items-center gap-3 mt-1">
-                            {hasMultipleTasks ? (
+                            {isFollowUp ? (
+                              <>
+                                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                                  Reply Follow-Up
+                                </span>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                  {getActionLabel(followUpAction as TaskAction)}
+                                </span>
+                              </>
+                            ) : hasMultipleTasks ? (
                               <span className={`text-[10px] font-black uppercase tracking-widest ${taskStrategyColor.text} ${taskStrategyColor.bg} px-2 py-0.5 rounded`}>
                                 {pendingCount} task{pendingCount !== 1 ? 's' : ''} today
                               </span>
@@ -1365,7 +1808,9 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
                                 Step {task.currentStepIndex + 1}
                               </span>
                             )}
-                            <span className={`text-[10px] font-bold uppercase tracking-wider ${taskStrategyColor.text}`}>{taskStrategy?.name}</span>
+                            {!isFollowUp && (
+                              <span className={`text-[10px] font-bold uppercase tracking-wider ${taskStrategyColor.text}`}>{taskStrategy?.name}</span>
+                            )}
                           </div>
                           {/* Progress bar for multi-task */}
                           {hasMultipleTasks && (
@@ -1386,7 +1831,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
                             {isOverdue ? 'Overdue' : isToday ? 'Today' : 'Upcoming'}
                           </p>
                           <p className="text-xs font-medium text-slate-400 mt-1">
-                            {new Date(task.nextTaskDate!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {new Date(getEffectiveTaskDate(task) + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                           </p>
                         </div>
 

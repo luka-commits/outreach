@@ -1,15 +1,16 @@
 import React, { useState, useCallback, memo, useDeferredValue, useEffect, useMemo } from 'react';
-import { Search, Plus, ChevronRight, Instagram, Mail, Phone, Facebook, Users, Globe, Filter, Star, ChevronDown, ListFilter, X, Download, Loader2, ChevronLeft, Trash2, Tag, CheckSquare, Square, Target, Edit3, Bookmark, Copy } from 'lucide-react';
-import { Lead, Strategy } from '../types';
+import { Search, ChevronRight, Instagram, Mail, Phone, Facebook, Users, Globe, Filter, Star, ChevronDown, ListFilter, X, Download, Loader2, ChevronLeft, Trash2, Tag, CheckSquare, Square, Target, Edit3, Bookmark, Copy } from 'lucide-react';
+import { Lead, Strategy, LostReason, BuiltInColumn } from '../types';
 import { getLeadStatusStyle, getRatingColor, getStrategyColor } from '../utils/styles';
 import { useAuth } from '../hooks/useAuth';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLeadsPaginatedQuery, usePaginatedLeadMutations, usePrefetchLeadsPage } from '../hooks/queries/useLeadsPaginated';
-import { useCreateSavedFilter, useDuplicatesSummary } from '../hooks/queries';
+import { useCreateSavedFilter, useDuplicatesSummary, useLeadTagsQuery, usePipelinePreferencesQuery, useUpdatePipelinePreferences, useCustomFieldDefinitionsQuery } from '../hooks/queries';
 import { SortField, SortDirection, LeadFilters, bulkUpdateLeadFields } from '../services/supabase';
 import { useToast } from './Toast';
 import { getErrorMessage } from '../utils/errorMessages';
 import { ColumnFilterDropdown } from './ColumnFilterDropdown';
+import { ColumnVisibilityDropdown } from './ColumnVisibilityDropdown';
 import BulkStatusModal from './BulkStatusModal';
 import BulkStrategyModal from './BulkStrategyModal';
 import BulkEditModal from './BulkEditModal';
@@ -20,6 +21,21 @@ import { LeadListSkeleton } from './ui/Skeleton';
 import { SaveFilterModal } from './SaveFilterModal';
 import { useSavedFiltersContext } from '../contexts/SavedFiltersContext';
 import { useNavigation } from '../contexts/NavigationContext';
+
+// Built-in column configuration
+const BUILT_IN_COLUMNS: BuiltInColumn[] = [
+  { key: 'prospect', label: 'Prospect', width: 'minmax(160px,2fr)', defaultVisible: true, required: true },
+  { key: 'location', label: 'Location', width: 'minmax(120px,1.2fr)', defaultVisible: true },
+  { key: 'industry', label: 'Industry', width: 'minmax(120px,1.2fr)', defaultVisible: true },
+  { key: 'trust', label: 'Trust', width: '90px', defaultVisible: true },
+  { key: 'sequence', label: 'Sequence', width: '160px', defaultVisible: true },
+  { key: 'channels', label: 'Channels', width: '120px', defaultVisible: true },
+  { key: 'tags', label: 'Tags', width: '120px', defaultVisible: true },
+  { key: 'status', label: 'Status', width: '120px', defaultVisible: true },
+];
+
+// Default visible columns (all built-in)
+const DEFAULT_VISIBLE_COLUMNS = BUILT_IN_COLUMNS.map(c => c.key);
 
 // Utility: Show only first niche term to keep table clean
 const getFirstNiche = (niche?: string): string => {
@@ -49,6 +65,7 @@ const STATUS_OPTIONS = [
   { value: 'replied', label: 'Responded' },
   { value: 'qualified', label: 'Qualified' },
   { value: 'disqualified', label: 'Not a Fit' },
+  { value: 'no_reply', label: 'No Reply' },
 ];
 
 // Channel options for the filter dropdown
@@ -68,6 +85,10 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
   const { activeSavedFilter, pendingFilters, clearPendingFilters, clearActiveSavedFilter } = useSavedFiltersContext();
   const createSavedFilter = useCreateSavedFilter(user?.id);
   const { data: duplicatesSummary } = useDuplicatesSummary(user?.id);
+  const { data: allTags = [] } = useLeadTagsQuery(user?.id);
+  const { data: pipelinePrefs } = usePipelinePreferencesQuery(user?.id);
+  const updatePipelinePrefs = useUpdatePipelinePreferences(user?.id);
+  const { data: customFields = [] } = useCustomFieldDefinitionsQuery(user?.id);
   const [search, setSearch] = useState('');
 
   // Array-based filters for Excel-style multi-select
@@ -75,6 +96,7 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
   const [strategyFilter, setStrategyFilter] = useState<string[]>([]);
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>([]);
   const [ratingRange, setRatingRange] = useState<{ min?: number; max?: number }>({});
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
 
   const [pageSize, setPageSize] = useState<PageSize>(25);
   const [currentPage, setCurrentPage] = useState(1);
@@ -107,10 +129,11 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
     channels: channelFilter && channelFilter.length > 0 ? channelFilter : undefined,
     ratingMin: ratingRange.min,
     ratingMax: ratingRange.max,
+    tagIds: tagFilter.length > 0 ? tagFilter : undefined,
     search: deferredSearch || undefined,
     sortBy: sortFields,
     sortDirection: sortDirections,
-  }), [pageSize, currentPage, statusFilter, strategyFilter, channelFilter, ratingRange, deferredSearch, sortFields, sortDirections]);
+  }), [pageSize, currentPage, statusFilter, strategyFilter, channelFilter, ratingRange, tagFilter, deferredSearch, sortFields, sortDirections]);
 
   // Query for data
   const { data, isLoading, isPlaceholderData } = useLeadsPaginatedQuery(user?.id, filters);
@@ -125,7 +148,7 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
   useEffect(() => {
     setSelectedLeadIds(new Set());
     setSelectAllChecked(false);
-  }, [currentPage, statusFilter, strategyFilter, channelFilter, ratingRange, deferredSearch, sortFields, sortDirections]);
+  }, [currentPage, statusFilter, strategyFilter, channelFilter, ratingRange, tagFilter, deferredSearch, sortFields, sortDirections]);
 
   // Apply pending filters from Smart List selection
   useEffect(() => {
@@ -155,6 +178,9 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
       if (pendingFilters.sortDirection) setSortDirections(pendingFilters.sortDirection);
       else setSortDirections(['desc']);
 
+      if (pendingFilters.tagIds) setTagFilter(pendingFilters.tagIds);
+      else setTagFilter([]);
+
       setCurrentPage(1);
       clearPendingFilters();
     }
@@ -178,8 +204,9 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
     if (strategyFilter.length > 0) count++;
     if (channelFilter && channelFilter.length > 0) count++;
     if (ratingRange.min !== undefined || ratingRange.max !== undefined) count++;
+    if (tagFilter.length > 0) count++;
     return count;
-  }, [statusFilter, strategyFilter, channelFilter, ratingRange]);
+  }, [statusFilter, strategyFilter, channelFilter, ratingRange, tagFilter]);
 
   // Clear all filters
   const clearAllFilters = useCallback(() => {
@@ -187,11 +214,58 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
     setStrategyFilter([]);
     setChannelFilter([]);
     setRatingRange({});
+    setTagFilter([]);
     setSearch('');
     resetSort();
     setCurrentPage(1);
     clearActiveSavedFilter();
   }, [clearActiveSavedFilter, resetSort]);
+
+  // Compute visible columns from preferences
+  const visibleColumns = useMemo(() => {
+    const savedCols = pipelinePrefs?.visibleColumns;
+    if (savedCols && savedCols.length > 0) {
+      // Ensure required columns are always included
+      const requiredCols = BUILT_IN_COLUMNS.filter(c => c.required).map(c => c.key);
+      const withRequired = [...new Set([...requiredCols, ...savedCols])];
+      // Maintain order from BUILT_IN_COLUMNS
+      return BUILT_IN_COLUMNS.filter(c => withRequired.includes(c.key)).map(c => c.key);
+    }
+    return DEFAULT_VISIBLE_COLUMNS;
+  }, [pipelinePrefs?.visibleColumns]);
+
+  const visibleCustomFieldIds = useMemo(() => {
+    const savedFields = pipelinePrefs?.visibleCustomFields;
+    // Check if user has explicitly set preferences (including empty array)
+    if (savedFields !== undefined && savedFields !== null) {
+      return savedFields;
+    }
+    // Default only when no preference exists: show custom fields with showInList=true
+    return customFields.filter(f => f.showInList).map(f => f.id);
+  }, [pipelinePrefs?.visibleCustomFields, customFields]);
+
+  // Get visible custom field definitions
+  const visibleCustomFields = useMemo(() => {
+    return customFields.filter(f => visibleCustomFieldIds.includes(f.id));
+  }, [customFields, visibleCustomFieldIds]);
+
+  // Generate dynamic grid template
+  const gridTemplate = useMemo(() => {
+    const cols = [
+      '40px', // checkbox column
+      ...BUILT_IN_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(c => c.width),
+      ...visibleCustomFields.map(() => 'minmax(100px,1fr)'),
+    ];
+    return cols.join(' ');
+  }, [visibleColumns, visibleCustomFields]);
+
+  // Handle column visibility change
+  const handleColumnVisibilityChange = useCallback((columns: string[], customFieldIds: string[]) => {
+    updatePipelinePrefs.mutate({
+      visibleColumns: columns,
+      visibleCustomFields: customFieldIds,
+    });
+  }, [updatePipelinePrefs]);
 
   // Handle save filter
   const handleSaveFilter = useCallback((filterData: { name: string; icon: string; color: string; filters: Record<string, unknown> }) => {
@@ -278,13 +352,13 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
     });
   }, [selectedLeadIds, bulkDelete, clearSelection, showToast]);
 
-  const handleBulkStatusChange = useCallback((status: Lead['status']) => {
+  const handleBulkStatusChange = useCallback((status: Lead['status'], lostReason?: LostReason, lostReasonNote?: string) => {
     const ids = Array.from(selectedLeadIds);
     if (ids.length === 0) {
       showToast('No leads selected', 'error');
       return;
     }
-    bulkUpdateStatus.mutate({ ids, status }, {
+    bulkUpdateStatus.mutate({ ids, status, lostReason, lostReasonNote }, {
       onSuccess: () => {
         showToast(`Updated status for ${ids.length} lead${ids.length !== 1 ? 's' : ''}`, 'success');
         clearSelection();
@@ -346,87 +420,87 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
   return (
     <div className="flex flex-col h-full space-y-6 animate-in fade-in duration-500">
       <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-6">
-        <div>
-          <h2 className="text-4xl font-black text-slate-900 tracking-tight flex items-center gap-4">
-            <div className="bg-emerald-500 p-2.5 rounded-2xl shadow-lg shadow-emerald-100 text-white"><Users size={28} /></div>
-            Pipeline
-          </h2>
-          <p className="text-slate-500 font-medium mt-1 flex items-center gap-3 flex-wrap">
-            Showing {totalCount.toLocaleString()} leads
-            {activeSavedFilter && (
-              <>
-                <span className="text-slate-300">•</span>
-                <span
-                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-sm font-semibold"
-                  style={{ backgroundColor: activeSavedFilter.color + '20', color: activeSavedFilter.color }}
-                >
-                  <Bookmark size={12} />
-                  {activeSavedFilter.name}
-                </span>
-              </>
-            )}
-            {activeFilterCount > 0 && !activeSavedFilter && (
-              <>
-                <span className="text-slate-300">•</span>
-                <span className="inline-flex items-center gap-1.5 text-indigo-600">
-                  <Filter size={14} />
-                  {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active
-                </span>
-              </>
-            )}
-            {(activeFilterCount > 0 || activeSavedFilter) && (
-              <button
-                onClick={clearAllFilters}
-                className="text-rose-500 hover:text-rose-600 font-semibold flex items-center gap-1"
+        <div className="flex items-center gap-3 flex-wrap">
+          <h2 className="text-2xl font-bold text-slate-900">Pipeline</h2>
+          <span className="text-slate-300">·</span>
+          <span className="text-sm font-medium text-slate-500">{totalCount.toLocaleString()} leads</span>
+          {activeSavedFilter && (
+            <>
+              <span className="text-slate-300">·</span>
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                style={{ backgroundColor: activeSavedFilter.color + '20', color: activeSavedFilter.color }}
               >
-                <X size={14} /> Clear
-              </button>
-            )}
-          </p>
+                <Bookmark size={10} />
+                {activeSavedFilter.name}
+              </span>
+            </>
+          )}
+          {activeFilterCount > 0 && !activeSavedFilter && (
+            <>
+              <span className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1 text-sm text-indigo-600">
+                <Filter size={12} />
+                {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''}
+              </span>
+            </>
+          )}
+          {(activeFilterCount > 0 || activeSavedFilter) && (
+            <button
+              onClick={clearAllFilters}
+              className="text-rose-500 hover:text-rose-600 text-sm font-medium flex items-center gap-1"
+            >
+              <X size={12} /> Clear
+            </button>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="relative group min-w-[320px]">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative group min-w-[240px]">
             {isLoading || isPlaceholderData ? (
-              <Loader2 className="absolute left-5 top-1/2 -translate-y-1/2 text-indigo-500 animate-spin" size={20} />
+              <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-500 animate-spin" size={16} />
             ) : (
-              <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={20} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={16} />
             )}
             <input
               type="text"
-              placeholder="Search companies, niche, city..."
+              placeholder="Search..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className={`pl-14 pr-6 py-4 bg-white border border-slate-200 rounded-[1.5rem] text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none w-full transition-all shadow-sm ${isLoading ? 'opacity-80' : ''}`}
+              className={`pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none w-full transition-all ${isLoading ? 'opacity-80' : ''}`}
             />
           </div>
+          <ColumnVisibilityDropdown
+            builtInColumns={BUILT_IN_COLUMNS}
+            customFields={customFields}
+            visibleColumns={visibleColumns}
+            visibleCustomFields={visibleCustomFieldIds}
+            onVisibilityChange={handleColumnVisibilityChange}
+          />
           {activeFilterCount > 0 && !activeSavedFilter && (
             <button
               onClick={() => setShowSaveFilterModal(true)}
-              className="bg-white border border-slate-200 hover:border-indigo-300 text-slate-600 hover:text-indigo-600 font-black px-6 py-4 rounded-2xl transition-all shadow-sm flex items-center gap-3 text-xs uppercase tracking-widest"
+              className="bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-600 font-medium px-3 py-2 rounded-lg transition-all text-sm flex items-center gap-2"
             >
-              <Bookmark size={18} /> Save Filter
+              <Bookmark size={16} /> Save Filter
             </button>
           )}
           <button
             onClick={() => setShowExportModal(true)}
             disabled={totalCount === 0}
-            className="bg-white border border-slate-200 hover:border-indigo-300 text-slate-600 hover:text-indigo-600 font-black px-6 py-4 rounded-2xl transition-all shadow-sm flex items-center gap-3 text-xs uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-600 font-medium px-3 py-2 rounded-lg transition-all text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Download size={18} /> Export
+            <Download size={16} /> Export
           </button>
           <button
             onClick={() => navigate('duplicates')}
-            className="bg-white border border-slate-200 hover:border-amber-300 text-slate-600 hover:text-amber-600 font-black px-6 py-4 rounded-2xl transition-all shadow-sm flex items-center gap-3 text-xs uppercase tracking-widest relative"
+            className="bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-600 font-medium px-3 py-2 rounded-lg transition-all text-sm flex items-center gap-2 relative"
           >
-            <Copy size={18} /> Duplicates
+            <Copy size={16} /> Duplicates
             {duplicatesSummary && (duplicatesSummary.companyName + duplicatesSummary.email + duplicatesSummary.phone) > 0 && (
-              <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
                 !
               </span>
             )}
-          </button>
-          <button onClick={onOpenUpload} className="bg-slate-900 hover:bg-slate-800 text-white font-black px-8 py-4 rounded-2xl transition-all shadow-xl shadow-slate-200 flex items-center gap-3 text-xs uppercase tracking-widest">
-            <Plus size={20} /> Import
           </button>
         </div>
       </header>
@@ -434,7 +508,7 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
       <div className={`bg-white border border-slate-200 rounded-xl shadow-sm flex-1 flex flex-col min-h-[600px] transition-opacity ${isLoading && !isPlaceholderData ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
         {/* Table Header with Excel-style column filters */}
         <div className="sticky top-0 z-10 bg-slate-50/90 backdrop-blur-xl border-b border-slate-100 rounded-t-xl">
-          <div className="grid grid-cols-[40px_minmax(160px,2fr)_minmax(120px,1.2fr)_minmax(120px,1.2fr)_90px_160px_120px_120px] min-w-[1020px]">
+          <div className="grid min-w-[1020px]" style={{ gridTemplateColumns: gridTemplate }}>
             {/* Checkbox column header */}
             <div className="px-2 py-3 flex items-center justify-center">
               <button
@@ -480,117 +554,162 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
             </div>
 
             {/* Location column - not sortable, but filterable (would need dynamic options) */}
-            <div className="px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">Location</div>
+            {visibleColumns.includes('location') && (
+              <div className="px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">Location</div>
+            )}
 
             {/* Industry column - not sortable for now */}
-            <div className="px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">Industry</div>
+            {visibleColumns.includes('industry') && (
+              <div className="px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider">Industry</div>
+            )}
 
             {/* Trust/Rating column - sortable with range filter */}
-            <div className="px-3 py-3 flex justify-center">
-              <ColumnFilterDropdown
-                label="Trust"
-                field="google_rating"
-                sortable={true}
-                sortDirection={sortFields.includes('google_rating') ? sortDirections[sortFields.indexOf('google_rating')] : null}
-                sortPriority={sortFields.length > 1 && sortFields.includes('google_rating') ? sortFields.indexOf('google_rating') + 1 : undefined}
-                onSort={(dir) => {
-                  const idx = sortFields.indexOf('google_rating');
-                  if (idx !== -1) {
-                    setSortDirections(prev => prev.map((d, i) => i === idx ? dir : d));
-                  } else {
-                    setSortFields(prev => [...prev, 'google_rating']);
-                    setSortDirections(prev => [...prev, dir]);
-                  }
-                  setCurrentPage(1);
-                }}
-                filterType="range"
-                rangeMin={0}
-                rangeMax={5}
-                rangeValue={ratingRange}
-                onRangeChange={(val) => { setRatingRange(val); setCurrentPage(1); }}
-              />
-            </div>
+            {visibleColumns.includes('trust') && (
+              <div className="px-3 py-3 flex justify-center">
+                <ColumnFilterDropdown
+                  label="Trust"
+                  field="google_rating"
+                  sortable={true}
+                  sortDirection={sortFields.includes('google_rating') ? sortDirections[sortFields.indexOf('google_rating')] : null}
+                  sortPriority={sortFields.length > 1 && sortFields.includes('google_rating') ? sortFields.indexOf('google_rating') + 1 : undefined}
+                  onSort={(dir) => {
+                    const idx = sortFields.indexOf('google_rating');
+                    if (idx !== -1) {
+                      setSortDirections(prev => prev.map((d, i) => i === idx ? dir : d));
+                    } else {
+                      setSortFields(prev => [...prev, 'google_rating']);
+                      setSortDirections(prev => [...prev, dir]);
+                    }
+                    setCurrentPage(1);
+                  }}
+                  filterType="range"
+                  rangeMin={0}
+                  rangeMax={5}
+                  rangeValue={ratingRange}
+                  onRangeChange={(val) => { setRatingRange(val); setCurrentPage(1); }}
+                  sortLabels={{ asc: 'Sort 0 → 5', desc: 'Sort 5 → 0' }}
+                />
+              </div>
+            )}
 
             {/* Sequence column - filterable with strategies */}
-            <div className="px-3 py-3 flex justify-center">
-              <ColumnFilterDropdown
-                label="Sequence"
-                field="strategy_id"
-                sortable={false}
-                filterType="multiselect"
-                options={strategyOptions.map(s => s.label)}
-                selectedValues={strategyFilter.map(id => {
-                  const strategy = strategyOptions.find(s => s.value === id);
-                  return strategy?.label || id;
-                })}
-                onFilterChange={(labels) => {
-                  const ids = labels.map(label => {
-                    const strategy = strategyOptions.find(s => s.label === label);
-                    return strategy?.value || label;
-                  });
-                  setStrategyFilter(ids);
-                  setCurrentPage(1);
-                }}
-              />
-            </div>
+            {visibleColumns.includes('sequence') && (
+              <div className="px-3 py-3 flex justify-center">
+                <ColumnFilterDropdown
+                  label="Sequence"
+                  field="strategy_id"
+                  sortable={false}
+                  filterType="multiselect"
+                  options={strategyOptions.map(s => s.label)}
+                  selectedValues={strategyFilter.map(id => {
+                    const strategy = strategyOptions.find(s => s.value === id);
+                    return strategy?.label || id;
+                  })}
+                  onFilterChange={(labels) => {
+                    const ids = labels.map(label => {
+                      const strategy = strategyOptions.find(s => s.label === label);
+                      return strategy?.value || label;
+                    });
+                    setStrategyFilter(ids);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+            )}
 
             {/* Channels column - filterable */}
-            <div className="px-3 py-3 flex justify-center">
-              <ColumnFilterDropdown
-                label="Channels"
-                field="channels"
-                sortable={false}
-                filterType="multiselect"
-                options={CHANNEL_OPTIONS.map(c => c.label)}
-                selectedValues={(channelFilter || []).map(ch => {
-                  const opt = CHANNEL_OPTIONS.find(c => c.value === ch);
-                  return opt?.label || ch;
-                })}
-                onFilterChange={(labels) => {
-                  const values = labels.map(label => {
-                    const opt = CHANNEL_OPTIONS.find(c => c.label === label);
-                    return opt?.value || label;
-                  }) as ChannelFilter;
-                  setChannelFilter(values);
-                  setCurrentPage(1);
-                }}
-              />
-            </div>
+            {visibleColumns.includes('channels') && (
+              <div className="px-3 py-3 flex justify-center">
+                <ColumnFilterDropdown
+                  label="Channels"
+                  field="channels"
+                  sortable={false}
+                  filterType="multiselect"
+                  options={CHANNEL_OPTIONS.map(c => c.label)}
+                  selectedValues={(channelFilter || []).map(ch => {
+                    const opt = CHANNEL_OPTIONS.find(c => c.value === ch);
+                    return opt?.label || ch;
+                  })}
+                  onFilterChange={(labels) => {
+                    const values = labels.map(label => {
+                      const opt = CHANNEL_OPTIONS.find(c => c.label === label);
+                      return opt?.value || label;
+                    }) as ChannelFilter;
+                    setChannelFilter(values);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Tags column - filterable */}
+            {visibleColumns.includes('tags') && (
+              <div className="px-3 py-3 flex justify-center">
+                <ColumnFilterDropdown
+                  label="Tags"
+                  field="tags"
+                  sortable={false}
+                  filterType="multiselect"
+                  options={allTags.map(t => t.name)}
+                  selectedValues={tagFilter.map(id => {
+                    const tag = allTags.find(t => t.id === id);
+                    return tag?.name || id;
+                  })}
+                  onFilterChange={(names) => {
+                    const ids = names.map(name => {
+                      const tag = allTags.find(t => t.name === name);
+                      return tag?.id || name;
+                    });
+                    setTagFilter(ids);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+            )}
 
             {/* Status column - sortable and filterable */}
-            <div className="px-3 py-3">
-              <ColumnFilterDropdown
-                label="Status"
-                field="status"
-                sortable={true}
-                sortDirection={sortFields.includes('status') ? sortDirections[sortFields.indexOf('status')] : null}
-                sortPriority={sortFields.length > 1 && sortFields.includes('status') ? sortFields.indexOf('status') + 1 : undefined}
-                onSort={(dir) => {
-                  const idx = sortFields.indexOf('status');
-                  if (idx !== -1) {
-                    setSortDirections(prev => prev.map((d, i) => i === idx ? dir : d));
-                  } else {
-                    setSortFields(prev => [...prev, 'status']);
-                    setSortDirections(prev => [...prev, dir]);
-                  }
-                  setCurrentPage(1);
-                }}
-                filterType="multiselect"
-                options={STATUS_OPTIONS.map(s => s.label)}
-                selectedValues={statusFilter.map(val => {
-                  const opt = STATUS_OPTIONS.find(s => s.value === val);
-                  return opt?.label || val;
-                })}
-                onFilterChange={(labels) => {
-                  const values = labels.map(label => {
-                    const opt = STATUS_OPTIONS.find(s => s.label === label);
-                    return opt?.value || label;
-                  });
-                  setStatusFilter(values);
-                  setCurrentPage(1);
-                }}
-              />
-            </div>
+            {visibleColumns.includes('status') && (
+              <div className="px-3 py-3">
+                <ColumnFilterDropdown
+                  label="Status"
+                  field="status"
+                  sortable={true}
+                  sortDirection={sortFields.includes('status') ? sortDirections[sortFields.indexOf('status')] : null}
+                  sortPriority={sortFields.length > 1 && sortFields.includes('status') ? sortFields.indexOf('status') + 1 : undefined}
+                  onSort={(dir) => {
+                    const idx = sortFields.indexOf('status');
+                    if (idx !== -1) {
+                      setSortDirections(prev => prev.map((d, i) => i === idx ? dir : d));
+                    } else {
+                      setSortFields(prev => [...prev, 'status']);
+                      setSortDirections(prev => [...prev, dir]);
+                    }
+                    setCurrentPage(1);
+                  }}
+                  filterType="multiselect"
+                  options={STATUS_OPTIONS.map(s => s.label)}
+                  selectedValues={statusFilter.map(val => {
+                    const opt = STATUS_OPTIONS.find(s => s.value === val);
+                    return opt?.label || val;
+                  })}
+                  onFilterChange={(labels) => {
+                    const values = labels.map(label => {
+                      const opt = STATUS_OPTIONS.find(s => s.label === label);
+                      return opt?.value || label;
+                    });
+                    setStatusFilter(values);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Custom field column headers */}
+            {visibleCustomFields.map(field => (
+              <div key={field.id} className="px-3 py-3 text-xs font-black text-slate-400 uppercase tracking-wider truncate" title={field.name}>
+                {field.name}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -609,7 +728,7 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
                     className={`group transition-all cursor-pointer border-b border-slate-50 ${isSelected ? 'bg-indigo-50/50' : 'hover:bg-indigo-50/30'}`}
                     onClick={() => onSelectLead(lead.id)}
                   >
-                    <div className="grid grid-cols-[40px_minmax(160px,2fr)_minmax(120px,1.2fr)_minmax(120px,1.2fr)_90px_160px_120px_120px] items-center">
+                    <div className="grid items-center" style={{ gridTemplateColumns: gridTemplate }}>
                       {/* Checkbox cell */}
                       <div className="px-2 py-3 flex items-center justify-center" onClick={(e) => toggleLeadSelection(lead.id, e)}>
                         <button className="p-1 rounded hover:bg-slate-200 transition-colors">
@@ -627,48 +746,57 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
                           {lead.websiteUrl && <div className="bg-slate-100 p-1.5 rounded-md shrink-0"><Globe size={12} className="text-slate-400" /></div>}
                         </div>
                       </div>
-                      <div className="px-3 py-3">
-                        <span className="text-xs text-slate-600 break-words" title={lead.location || 'Unknown'}>{lead.location || 'Unknown'}</span>
-                      </div>
-                      <div className="px-3 py-3">
-                        <span className="text-xs text-slate-600 break-words" title={lead.niche || 'Other'}>{getFirstNiche(lead.niche)}</span>
-                      </div>
-                      <div className="px-3 py-3">
-                        <div className="flex flex-col items-center justify-center">
-                          <div className="flex items-center gap-1.5">
-                            <Star size={14} className={lead.googleRating ? 'text-amber-400 fill-amber-400' : 'text-slate-100'} />
-                            <span className={`text-xs font-black ${getRatingColor(lead.googleRating)}`}>
-                              {lead.googleRating ? lead.googleRating.toFixed(1) : '-'}
-                            </span>
-                          </div>
-                          <span className="text-[9px] font-black text-slate-300 uppercase mt-0.5">{lead.googleReviewCount || 0} REVS</span>
+                      {visibleColumns.includes('location') && (
+                        <div className="px-3 py-3">
+                          <span className="text-xs text-slate-600 break-words" title={lead.location || 'Unknown'}>{lead.location || 'Unknown'}</span>
                         </div>
-                      </div>
-                      <div className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                        {(() => {
-                          const selectedStrategy = strategies.find(s => s.id === lead.strategyId);
-                          const stratColor = getStrategyColor(selectedStrategy?.color);
-                          return (
-                            <div className="relative group/select">
-                              <select
-                                value={lead.strategyId || ''}
-                                onChange={(e) => handleStrategyChange(lead, e.target.value)}
-                                className={`appearance-none text-[10px] font-black uppercase px-3 py-2 rounded-2xl border transition-all cursor-pointer pr-7 w-full text-center ${lead.strategyId
-                                    ? `${stratColor.solid} text-white ${stratColor.border} shadow-lg`
-                                    : 'bg-slate-50 text-slate-400 border-slate-100 hover:border-indigo-300 hover:text-indigo-600'
-                                  }`}
-                              >
-                                <option value="">Select Strategy</option>
-                                {strategies.map(s => (
-                                  <option key={s.id} value={s.id}>{s.name}</option>
-                                ))}
-                              </select>
-                              <ChevronDown size={12} className={`absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${lead.strategyId ? 'text-white/60' : 'text-slate-300'}`} />
+                      )}
+                      {visibleColumns.includes('industry') && (
+                        <div className="px-3 py-3">
+                          <span className="text-xs text-slate-600 break-words" title={lead.niche || 'Other'}>{getFirstNiche(lead.niche)}</span>
+                        </div>
+                      )}
+                      {visibleColumns.includes('trust') && (
+                        <div className="px-3 py-3">
+                          <div className="flex flex-col items-center justify-center">
+                            <div className="flex items-center gap-1.5">
+                              <Star size={14} className={lead.googleRating ? 'text-amber-400 fill-amber-400' : 'text-slate-100'} />
+                              <span className={`text-xs font-black ${getRatingColor(lead.googleRating)}`}>
+                                {lead.googleRating ? lead.googleRating.toFixed(1) : '-'}
+                              </span>
                             </div>
-                          );
-                        })()}
-                      </div>
-                      <div className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                            <span className="text-[9px] font-black text-slate-300 uppercase mt-0.5">{lead.googleReviewCount || 0} REVS</span>
+                          </div>
+                        </div>
+                      )}
+                      {visibleColumns.includes('sequence') && (
+                        <div className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                          {(() => {
+                            const selectedStrategy = strategies.find(s => s.id === lead.strategyId);
+                            const stratColor = getStrategyColor(selectedStrategy?.color);
+                            return (
+                              <div className="relative group/select">
+                                <select
+                                  value={lead.strategyId || ''}
+                                  onChange={(e) => handleStrategyChange(lead, e.target.value)}
+                                  className={`appearance-none text-[10px] font-black uppercase px-3 py-2 rounded-2xl border transition-all cursor-pointer pr-7 w-full text-center ${lead.strategyId
+                                      ? `${stratColor.solid} text-white ${stratColor.border} shadow-lg`
+                                      : 'bg-slate-50 text-slate-400 border-slate-100 hover:border-indigo-300 hover:text-indigo-600'
+                                    }`}
+                                >
+                                  <option value="">Select Strategy</option>
+                                  {strategies.map(s => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                  ))}
+                                </select>
+                                <ChevronDown size={12} className={`absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${lead.strategyId ? 'text-white/60' : 'text-slate-300'}`} />
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      {visibleColumns.includes('channels') && (
+                        <div className="px-3 py-3" onClick={e => e.stopPropagation()}>
                         {/* Default: Show channel indicators */}
                         <div className="flex justify-center gap-1 group-hover:hidden">
                           <Indicator active={!!lead.instagramUrl} icon={<Instagram size={14} />} activeClass="bg-pink-500 text-white shadow-lg shadow-pink-100" />
@@ -720,11 +848,47 @@ const LeadList: React.FC<LeadListProps> = ({ strategies, onSelectLead, onOpenUpl
                           )}
                         </div>
                       </div>
-                      <div className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                        <div className={`text-[10px] font-black uppercase py-2 px-2 rounded-[1.25rem] border text-center shadow-sm whitespace-nowrap ${getLeadStatusStyle(lead.status)}`}>
-                          {lead.status.replace('_', ' ')}
+                      )}
+                      {/* Tags column */}
+                      {visibleColumns.includes('tags') && (
+                        <div className="px-3 py-3">
+                          {lead.tags && lead.tags.length > 0 ? (
+                            <div className="flex gap-1 flex-wrap justify-center">
+                              {lead.tags.slice(0, 2).map(tag => (
+                                <span
+                                  key={tag.id}
+                                  className="px-1.5 py-0.5 text-[10px] font-medium rounded-full text-white truncate max-w-[60px]"
+                                  style={{ backgroundColor: tag.color }}
+                                  title={tag.name}
+                                >
+                                  {tag.name}
+                                </span>
+                              ))}
+                              {lead.tags.length > 2 && (
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  +{lead.tags.length - 2}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-slate-300 text-center">-</div>
+                          )}
                         </div>
-                      </div>
+                      )}
+                      {/* Status column */}
+                      {visibleColumns.includes('status') && (
+                        <div className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                          <div className={`text-[10px] font-black uppercase py-2 px-2 rounded-[1.25rem] border text-center shadow-sm whitespace-nowrap ${getLeadStatusStyle(lead.status)}`}>
+                            {lead.status.replace('_', ' ')}
+                          </div>
+                        </div>
+                      )}
+                      {/* Custom field cells */}
+                      {visibleCustomFields.map(field => (
+                        <div key={field.id} className="px-3 py-3">
+                          <span className="text-xs text-slate-400">-</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 );

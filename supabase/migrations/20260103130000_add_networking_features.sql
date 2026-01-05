@@ -33,26 +33,31 @@ ALTER TABLE public.user_public_profiles ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
 -- Users can view their own profile (regardless of visibility)
+DROP POLICY IF EXISTS "Users can view own public profile" ON public.user_public_profiles;
 CREATE POLICY "Users can view own public profile"
   ON public.user_public_profiles FOR SELECT
   USING (auth.uid() = user_id);
 
 -- Users can view other visible profiles (for leaderboard)
+DROP POLICY IF EXISTS "Users can view visible public profiles" ON public.user_public_profiles;
 CREATE POLICY "Users can view visible public profiles"
   ON public.user_public_profiles FOR SELECT
   USING (is_visible = true);
 
 -- Users can insert their own profile
+DROP POLICY IF EXISTS "Users can insert own public profile" ON public.user_public_profiles;
 CREATE POLICY "Users can insert own public profile"
   ON public.user_public_profiles FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
 -- Users can update their own profile
+DROP POLICY IF EXISTS "Users can update own public profile" ON public.user_public_profiles;
 CREATE POLICY "Users can update own public profile"
   ON public.user_public_profiles FOR UPDATE
   USING (auth.uid() = user_id);
 
 -- Users can delete their own profile
+DROP POLICY IF EXISTS "Users can delete own public profile" ON public.user_public_profiles;
 CREATE POLICY "Users can delete own public profile"
   ON public.user_public_profiles FOR DELETE
   USING (auth.uid() = user_id);
@@ -100,11 +105,13 @@ ALTER TABLE public.user_activity_metrics ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
 -- Users can view their own metrics
+DROP POLICY IF EXISTS "Users can view own metrics" ON public.user_activity_metrics;
 CREATE POLICY "Users can view own metrics"
   ON public.user_activity_metrics FOR SELECT
   USING (auth.uid() = user_id);
 
 -- Users can view metrics of visible profiles (for leaderboard)
+DROP POLICY IF EXISTS "Users can view visible user metrics" ON public.user_activity_metrics;
 CREATE POLICY "Users can view visible user metrics"
   ON public.user_activity_metrics FOR SELECT
   USING (
@@ -116,11 +123,13 @@ CREATE POLICY "Users can view visible user metrics"
   );
 
 -- Users can insert their own metrics
+DROP POLICY IF EXISTS "Users can insert own metrics" ON public.user_activity_metrics;
 CREATE POLICY "Users can insert own metrics"
   ON public.user_activity_metrics FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
 -- Users can update their own metrics
+DROP POLICY IF EXISTS "Users can update own metrics" ON public.user_activity_metrics;
 CREATE POLICY "Users can update own metrics"
   ON public.user_activity_metrics FOR UPDATE
   USING (auth.uid() = user_id);

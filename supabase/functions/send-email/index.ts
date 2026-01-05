@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse } from "../_shared/cors.ts"
-import { safeDecrypt, encrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
+import { safeDecrypt, encrypt, requireEncryption, isEncryptionConfigured } from "../_shared/encryption.ts"
 import { isValidEmail, sanitizeMimeHeader } from "../_shared/validation.ts"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rateLimit.ts"
 
@@ -285,23 +285,29 @@ serve(async (req) => {
         });
       }
 
-      // Decrypt tokens if encryption is configured
-      let accessToken: string | null = profile.gmail_access_token;
-      let refreshToken: string | null = profile.gmail_refresh_token;
+      // Decrypt tokens (REQUIRED - credentials must be encrypted)
+      // SECURITY: Require encryption for credential storage
+      try {
+        requireEncryption();
+      } catch {
+        console.error('Encryption not configured');
+        return new Response(JSON.stringify({ error: 'Server configuration error. Please contact support.' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500,
+        });
+      }
 
-      if (isEncryptionConfigured()) {
-        accessToken = await safeDecrypt(profile.gmail_access_token);
-        refreshToken = await safeDecrypt(profile.gmail_refresh_token);
+      const accessToken = await safeDecrypt(profile.gmail_access_token);
+      const refreshToken = await safeDecrypt(profile.gmail_refresh_token);
 
-        if (!accessToken || !refreshToken) {
-          return new Response(JSON.stringify({
-            error: 'Gmail credentials corrupted. Please reconnect Gmail in Settings.',
-            tokenExpired: true
-          }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 401,
-          });
-        }
+      if (!accessToken || !refreshToken) {
+        return new Response(JSON.stringify({
+          error: 'Gmail credentials corrupted. Please reconnect Gmail in Settings.',
+          tokenExpired: true
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 401,
+        });
       }
 
       const gmailClientId = Deno.env.get('GMAIL_CLIENT_ID');
@@ -331,11 +337,8 @@ serve(async (req) => {
           });
         }
 
-        // Re-encrypt and store the new token
-        let tokenToStore = refreshResult.accessToken;
-        if (isEncryptionConfigured()) {
-          tokenToStore = await encrypt(refreshResult.accessToken);
-        }
+        // Re-encrypt and store the new token (encryption already verified above)
+        const tokenToStore = await encrypt(refreshResult.accessToken);
 
         await supabaseAdmin
           .from('profiles')
@@ -345,16 +348,23 @@ serve(async (req) => {
           })
           .eq('id', user.id);
 
-        accessToken = refreshResult.accessToken;
+        // Use the new access token for sending
+        result = await sendViaGmail(
+          refreshResult.accessToken,
+          lead.email,
+          safeSubject,
+          bodyHtml,
+          profile.gmail_email
+        );
+      } else {
+        result = await sendViaGmail(
+          accessToken,
+          lead.email,
+          safeSubject,
+          bodyHtml,
+          profile.gmail_email
+        );
       }
-
-      result = await sendViaGmail(
-        accessToken,
-        lead.email,
-        safeSubject,
-        bodyHtml,
-        profile.gmail_email
-      );
 
     } else if (provider === 'resend') {
       // Check if we have Resend credentials
@@ -365,19 +375,26 @@ serve(async (req) => {
         });
       }
 
-      // Decrypt Resend API key if encryption is configured
-      let resendApiKey: string = profile.resend_api_key;
-      if (isEncryptionConfigured()) {
-        const decrypted = await safeDecrypt(profile.resend_api_key);
-        if (!decrypted) {
-          return new Response(JSON.stringify({
-            error: 'Resend credentials corrupted. Please reconfigure in Settings.',
-          }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 400,
-          });
-        }
-        resendApiKey = decrypted;
+      // Decrypt Resend API key (REQUIRED - credentials must be encrypted)
+      // SECURITY: Require encryption for credential storage
+      try {
+        requireEncryption();
+      } catch {
+        console.error('Encryption not configured');
+        return new Response(JSON.stringify({ error: 'Server configuration error. Please contact support.' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500,
+        });
+      }
+
+      const resendApiKey = await safeDecrypt(profile.resend_api_key);
+      if (!resendApiKey) {
+        return new Response(JSON.stringify({
+          error: 'Resend credentials corrupted. Please reconfigure in Settings.',
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400,
+        });
       }
 
       result = await sendViaResend(

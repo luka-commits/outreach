@@ -1,10 +1,18 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import {
   Loader2, AlertCircle, RefreshCw, BarChart3, TrendingUp,
   Mail, Instagram, Phone, Linkedin, Users, MessageCircle,
-  PhoneCall, CheckCircle, Voicemail, PhoneMissed, XCircle, Clock, Trophy, ArrowRight,
-  Calendar, AlertTriangle, Facebook
+  PhoneCall, CheckCircle, Voicemail, PhoneMissed, XCircle, Clock, Trophy,
+  Calendar, AlertTriangle, Facebook, UserX
 } from 'lucide-react';
+
+// Funnel color palette
+const funnelColors = {
+  notContacted: { primary: '#94A3B8', light: '#CBD5E1' },  // slate
+  inProgress: { primary: '#F59E0B', light: '#FCD34D' },    // amber
+  replied: { primary: '#3B82F6', light: '#93C5FD' },       // pilot-blue
+  qualified: { primary: '#10B981', light: '#6EE7B7' },     // emerald
+};
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
@@ -46,16 +54,18 @@ const Reporting: React.FC<ReportingProps> = ({ onNavigateToPricing }) => {
   const pipelineData = useMemo(() => {
     if (!statusCounts) return null;
 
-    const total = Object.values(statusCounts).reduce((acc, count) => acc + count, 0);
+    const counts = statusCounts as Record<string, number>;
+    const total = Object.values(counts).reduce((acc: number, count: number) => acc + count, 0);
     if (total === 0) return null;
 
     return {
       total,
-      notContacted: statusCounts.not_contacted || 0,
-      inProgress: statusCounts.in_progress || 0,
-      replied: statusCounts.replied || 0,
-      qualified: statusCounts.qualified || 0,
-      disqualified: statusCounts.disqualified || 0,
+      notContacted: counts.not_contacted || 0,
+      inProgress: counts.in_progress || 0,
+      replied: counts.replied || 0,
+      qualified: counts.qualified || 0,
+      disqualified: counts.disqualified || 0,
+      noReply: counts.no_reply || 0,
     };
   }, [statusCounts]);
 
@@ -158,34 +168,8 @@ const Reporting: React.FC<ReportingProps> = ({ onNavigateToPricing }) => {
           </div>
 
           {/* Funnel Visualization */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
-            <FunnelStage
-              label="Not Contacted"
-              count={pipelineData.notContacted}
-              total={pipelineData.total}
-              color="bg-slate-400"
-            />
-            <ArrowRight className="text-slate-300 hidden sm:block" size={20} />
-            <FunnelStage
-              label="In Progress"
-              count={pipelineData.inProgress}
-              total={pipelineData.total}
-              color="bg-amber-500"
-            />
-            <ArrowRight className="text-slate-300 hidden sm:block" size={20} />
-            <FunnelStage
-              label="Replied"
-              count={pipelineData.replied}
-              total={pipelineData.total}
-              color="bg-blue-500"
-            />
-            <ArrowRight className="text-slate-300 hidden sm:block" size={20} />
-            <FunnelStage
-              label="Qualified"
-              count={pipelineData.qualified}
-              total={pipelineData.total}
-              color="bg-emerald-500"
-            />
+          <div className="mb-8">
+            <PipelineFunnel data={pipelineData} />
           </div>
 
           {/* Alert Card */}
@@ -490,25 +474,6 @@ const Reporting: React.FC<ReportingProps> = ({ onNavigateToPricing }) => {
 
 // --- Helper Components ---
 
-const FunnelStage = React.memo<{
-  label: string;
-  count: number;
-  total: number;
-  color: string;
-}>(({ label, count, total, color }) => {
-  const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
-  return (
-    <div className="flex flex-col items-center min-w-[100px]">
-      <div className={`w-16 h-16 rounded-2xl ${color} flex items-center justify-center mb-2`}>
-        <span className="text-white text-lg font-black">{count}</span>
-      </div>
-      <span className="text-xs font-bold text-slate-600">{label}</span>
-      <span className="text-[10px] text-slate-400">{percentage}%</span>
-    </div>
-  );
-});
-FunnelStage.displayName = 'FunnelStage';
-
 const AlertCard = React.memo<{
   icon: React.ReactNode;
   label: string;
@@ -597,5 +562,410 @@ const CallOutcomeCard = React.memo<{
   );
 });
 CallOutcomeCard.displayName = 'CallOutcomeCard';
+
+// --- Funnel Visualization Components ---
+
+interface FunnelFlowProps {
+  index: number;
+  fromCount: number;
+  toCount: number;
+  maxCount: number;
+  stageWidth: number;
+  height: number;
+  fromColor: string;
+  toColor: string;
+}
+
+const FunnelFlow = React.memo<FunnelFlowProps>(({
+  index,
+  fromCount,
+  toCount,
+  maxCount,
+  stageWidth,
+  height,
+  fromColor,
+  toColor,
+}) => {
+  const maxFlowHeight = height * 0.7;
+  const fromHeight = maxCount > 0 ? (fromCount / maxCount) * maxFlowHeight : 0;
+  const toHeight = maxCount > 0 ? (toCount / maxCount) * maxFlowHeight : 0;
+
+  // X positions - leave space for stage labels
+  const startX = (index + 0.5) * stageWidth + stageWidth * 0.2;
+  const endX = (index + 1.5) * stageWidth - stageWidth * 0.2;
+  const midX = (startX + endX) / 2;
+
+  // Y center
+  const centerY = height / 2;
+
+  // Create bezier path for flowing curve
+  const path = `
+    M ${startX} ${centerY - fromHeight / 2}
+    C ${midX} ${centerY - fromHeight / 2},
+      ${midX} ${centerY - toHeight / 2},
+      ${endX} ${centerY - toHeight / 2}
+    L ${endX} ${centerY + toHeight / 2}
+    C ${midX} ${centerY + toHeight / 2},
+      ${midX} ${centerY + fromHeight / 2},
+      ${startX} ${centerY + fromHeight / 2}
+    Z
+  `;
+
+  const gradientId = `flow-grad-${index}`;
+
+  return (
+    <g>
+      <defs>
+        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor={fromColor} stopOpacity="0.6" />
+          <stop offset="100%" stopColor={toColor} stopOpacity="0.4" />
+        </linearGradient>
+      </defs>
+      <path
+        d={path}
+        fill={`url(#${gradientId})`}
+        className="transition-all duration-700 ease-out"
+        style={{
+          filter: 'drop-shadow(0 2px 4px rgba(0, 0, 0, 0.05))',
+        }}
+      />
+    </g>
+  );
+});
+FunnelFlow.displayName = 'FunnelFlow';
+
+interface FunnelStageNewProps {
+  stageKey: string;
+  label: string;
+  count: number;
+  percentage: number;
+  color: { primary: string; light: string };
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  index: number;
+}
+
+const FunnelStageNew = React.memo<FunnelStageNewProps>(({
+  stageKey,
+  label,
+  count,
+  percentage,
+  color,
+  icon: Icon,
+  index,
+}) => {
+  // Map color to Tailwind classes for icons
+  const iconColorClass = {
+    notContacted: 'text-slate-400',
+    inProgress: 'text-amber-500',
+    replied: 'text-blue-500',
+    qualified: 'text-emerald-500',
+  }[stageKey] || 'text-slate-500';
+
+  const bgColorClass = {
+    notContacted: 'bg-slate-100',
+    inProgress: 'bg-amber-50',
+    replied: 'bg-blue-50',
+    qualified: 'bg-emerald-50',
+  }[stageKey] || 'bg-slate-100';
+
+  return (
+    <div
+      className="flex flex-col items-center text-center"
+      style={{
+        animation: `fadeInUp 0.5s ease-out ${index * 0.1}s both`,
+      }}
+    >
+      {/* Icon */}
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${bgColorClass}`}>
+        <Icon size={18} className={iconColorClass} />
+      </div>
+
+      {/* Label */}
+      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+        {label}
+      </span>
+
+      {/* Percentage (large) */}
+      <span
+        className="text-2xl font-black tracking-tight mb-0.5"
+        style={{ color: color.primary }}
+      >
+        {percentage.toFixed(1)}%
+      </span>
+
+      {/* Count */}
+      <span className="text-sm font-bold text-slate-500">
+        {count.toLocaleString()}
+      </span>
+    </div>
+  );
+});
+FunnelStageNew.displayName = 'FunnelStageNew';
+
+interface FunnelDropoffProps {
+  noReply: number;
+  disqualified: number;
+  total: number;
+}
+
+const FunnelDropoff = React.memo<FunnelDropoffProps>(({ noReply, disqualified, total }) => {
+  const noReplyPercent = total > 0 ? (noReply / total) * 100 : 0;
+  const disqualifiedPercent = total > 0 ? (disqualified / total) * 100 : 0;
+
+  return (
+    <div className="flex flex-wrap gap-3 mt-6 justify-center">
+      {/* No Reply Card */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-xl border border-slate-200">
+        <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center">
+          <Clock size={16} className="text-slate-500" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-slate-700">No Reply</p>
+          <p className="text-xs text-slate-500">
+            {noReply.toLocaleString()} ({noReplyPercent.toFixed(1)}%)
+          </p>
+        </div>
+      </div>
+
+      {/* Disqualified Card */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-rose-50 rounded-xl border border-rose-200">
+        <div className="w-8 h-8 bg-rose-100 rounded-lg flex items-center justify-center">
+          <UserX size={16} className="text-rose-500" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-rose-700">Disqualified</p>
+          <p className="text-xs text-rose-500">
+            {disqualified.toLocaleString()} ({disqualifiedPercent.toFixed(1)}%)
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+});
+FunnelDropoff.displayName = 'FunnelDropoff';
+
+interface MobileFunnelProps {
+  stages: Array<{
+    key: string;
+    label: string;
+    count: number;
+    percentage: number;
+    color: { primary: string; light: string };
+    icon: React.ComponentType<{ size?: number; className?: string }>;
+  }>;
+  noReply: number;
+  disqualified: number;
+  total: number;
+}
+
+const MobileFunnel = React.memo<MobileFunnelProps>(({ stages, noReply, disqualified, total }) => {
+  // Map stage keys to Tailwind classes
+  const getIconClasses = (key: string) => {
+    const iconMap: Record<string, { bg: string; text: string }> = {
+      notContacted: { bg: 'bg-slate-100', text: 'text-slate-400' },
+      inProgress: { bg: 'bg-amber-50', text: 'text-amber-500' },
+      replied: { bg: 'bg-blue-50', text: 'text-blue-500' },
+      qualified: { bg: 'bg-emerald-50', text: 'text-emerald-500' },
+    };
+    return iconMap[key] || { bg: 'bg-slate-100', text: 'text-slate-500' };
+  };
+
+  const getTextColorClass = (key: string) => {
+    const textMap: Record<string, string> = {
+      notContacted: 'text-slate-400',
+      inProgress: 'text-amber-500',
+      replied: 'text-blue-500',
+      qualified: 'text-emerald-500',
+    };
+    return textMap[key] || 'text-slate-500';
+  };
+
+  const getBarColorClass = (key: string) => {
+    const barMap: Record<string, string> = {
+      notContacted: 'bg-slate-400',
+      inProgress: 'bg-amber-500',
+      replied: 'bg-blue-500',
+      qualified: 'bg-emerald-500',
+    };
+    return barMap[key] || 'bg-slate-500';
+  };
+
+  return (
+    <div className="space-y-4">
+      {stages.map((stage) => {
+        const Icon = stage.icon;
+        const iconClasses = getIconClasses(stage.key);
+        return (
+          <div key={stage.key} className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${iconClasses.bg}`}>
+              <Icon size={20} className={iconClasses.text} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between mb-1.5">
+                <span className="text-sm font-bold text-slate-700">{stage.label}</span>
+                <span className={`text-sm font-black ${getTextColorClass(stage.key)}`}>
+                  {stage.count.toLocaleString()}
+                </span>
+              </div>
+              <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ${getBarColorClass(stage.key)}`}
+                  style={{ width: `${Math.max(stage.percentage, 2)}%` }}
+                />
+              </div>
+              <p className="text-xs text-slate-400 mt-1">{stage.percentage.toFixed(1)}%</p>
+            </div>
+          </div>
+        );
+      })}
+
+      <FunnelDropoff noReply={noReply} disqualified={disqualified} total={total} />
+    </div>
+  );
+});
+MobileFunnel.displayName = 'MobileFunnel';
+
+interface PipelineFunnelProps {
+  data: {
+    total: number;
+    notContacted: number;
+    inProgress: number;
+    replied: number;
+    qualified: number;
+    disqualified: number;
+    noReply: number;
+  };
+}
+
+const PipelineFunnel = React.memo<PipelineFunnelProps>(({ data }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 700, height: 200 });
+
+  // Responsive dimension tracking
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const observer = new ResizeObserver(entries => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width } = entry.contentRect;
+      setDimensions({
+        width: Math.max(width, 300),
+        height: width < 640 ? 400 : 200,
+      });
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  // Stage data with calculations
+  const stages = useMemo(() => [
+    { key: 'notContacted', label: 'Not Contacted', count: data.notContacted, color: funnelColors.notContacted, icon: Users },
+    { key: 'inProgress', label: 'In Progress', count: data.inProgress, color: funnelColors.inProgress, icon: Clock },
+    { key: 'replied', label: 'Replied', count: data.replied, color: funnelColors.replied, icon: MessageCircle },
+    { key: 'qualified', label: 'Qualified', count: data.qualified, color: funnelColors.qualified, icon: CheckCircle },
+  ].map(stage => ({
+    ...stage,
+    percentage: data.total > 0 ? (stage.count / data.total) * 100 : 0,
+  })), [data]);
+
+  // Flow connections between stages
+  const flows = useMemo(() => {
+    const result: Array<{ from: typeof stages[0]; to: typeof stages[0] }> = [];
+    for (let i = 0; i < stages.length - 1; i++) {
+      const from = stages[i];
+      const to = stages[i + 1];
+      if (from && to) {
+        result.push({ from, to });
+      }
+    }
+    return result;
+  }, [stages]);
+
+  const isMobile = dimensions.width < 640;
+
+  if (isMobile) {
+    return (
+      <div ref={containerRef} className="w-full">
+        <MobileFunnel
+          stages={stages}
+          noReply={data.noReply}
+          disqualified={data.disqualified}
+          total={data.total}
+        />
+      </div>
+    );
+  }
+
+  const stageWidth = dimensions.width / 4;
+
+  return (
+    <div ref={containerRef} className="w-full">
+      {/* CSS for animation */}
+      <style>{`
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
+
+      {/* Main funnel visualization */}
+      <div className="relative" style={{ height: dimensions.height }}>
+        {/* SVG for flow paths */}
+        <svg
+          viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
+          className="absolute inset-0 w-full h-full"
+          preserveAspectRatio="xMidYMid meet"
+        >
+          {/* Flow paths */}
+          {flows.map((flow, i) => (
+            <FunnelFlow
+              key={i}
+              index={i}
+              fromCount={flow.from.count}
+              toCount={flow.to.count}
+              maxCount={data.total}
+              stageWidth={stageWidth}
+              height={dimensions.height}
+              fromColor={flow.from.color.primary}
+              toColor={flow.to.color.primary}
+            />
+          ))}
+        </svg>
+
+        {/* Stage overlays (positioned over SVG) */}
+        <div className="absolute inset-0 flex justify-around items-center">
+          {stages.map((stage, i) => (
+            <FunnelStageNew
+              key={stage.key}
+              stageKey={stage.key}
+              label={stage.label}
+              count={stage.count}
+              percentage={stage.percentage}
+              color={stage.color}
+              icon={stage.icon}
+              index={i}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Dropoff indicators */}
+      <FunnelDropoff
+        noReply={data.noReply}
+        disqualified={data.disqualified}
+        total={data.total}
+      />
+    </div>
+  );
+});
+PipelineFunnel.displayName = 'PipelineFunnel';
 
 export default Reporting;

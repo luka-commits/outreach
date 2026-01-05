@@ -25,6 +25,9 @@ export interface ColumnFilterDropdownProps {
   rangeValue?: { min?: number; max?: number };
   onRangeChange?: (value: { min?: number; max?: number }) => void;
 
+  // Custom sort labels (for numeric columns)
+  sortLabels?: { asc: string; desc: string };
+
   // Loading state for dynamic options
   isLoading?: boolean;
 }
@@ -44,6 +47,7 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
   rangeMax = 5,
   rangeValue,
   onRangeChange,
+  sortLabels,
   isLoading = false,
 }: ColumnFilterDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -91,10 +95,16 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
     }
   }, [isOpen]);
 
-  // Close on scroll (dropdown would be mispositioned)
+  // Close on scroll (dropdown would be mispositioned) - but not if scrolling inside dropdown
   useEffect(() => {
     if (isOpen) {
-      const handleScroll = () => setIsOpen(false);
+      const handleScroll = (e: Event) => {
+        // Don't close if scrolling inside the dropdown
+        if (dropdownRef.current?.contains(e.target as Node)) {
+          return;
+        }
+        setIsOpen(false);
+      };
       window.addEventListener('scroll', handleScroll, true);
       return () => window.removeEventListener('scroll', handleScroll, true);
     }
@@ -213,7 +223,7 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
                 }`}
               >
                 <ChevronUp size={14} />
-                Sort A → Z
+                {sortLabels?.asc || 'Sort A → Z'}
                 {sortDirection === 'asc' && <Check size={14} className="ml-auto text-pilot-blue" />}
               </button>
               <button
@@ -223,7 +233,7 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
                 }`}
               >
                 <ChevronDown size={14} />
-                Sort Z → A
+                {sortLabels?.desc || 'Sort Z → A'}
                 {sortDirection === 'desc' && <Check size={14} className="ml-auto text-pilot-blue" />}
               </button>
             </div>
@@ -326,6 +336,7 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
                       ...prev,
                       min: e.target.value ? Number(e.target.value) : undefined
                     }))}
+                    onMouseDown={(e) => e.stopPropagation()}
                     placeholder="0"
                     className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-pilot-blue/10 focus:border-pilot-blue/50"
                   />
@@ -343,6 +354,7 @@ export const ColumnFilterDropdown = React.memo(function ColumnFilterDropdown({
                       ...prev,
                       max: e.target.value ? Number(e.target.value) : undefined
                     }))}
+                    onMouseDown={(e) => e.stopPropagation()}
                     placeholder="5"
                     className="w-full px-2.5 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-pilot-blue/10 focus:border-pilot-blue/50"
                   />

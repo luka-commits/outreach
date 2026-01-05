@@ -53,7 +53,10 @@ interface ViewRouterProps {
     direction?: Activity['direction']
   ) => Promise<void>;
   onUpdateGoals: (goals: OutreachGoals) => void;
-  onUpdateStrategies: (strategies: Strategy[]) => void;
+  onAddStrategy: (strategy: Strategy) => Promise<void>;
+  onUpdateStrategy: (strategy: Strategy) => Promise<void>;
+  onDeleteStrategy: (id: string) => Promise<void>;
+  onReorderStrategies: (updates: Array<{ id: string; position: number }>) => Promise<void>;
   onOpenUpload: () => void;
 }
 
@@ -70,7 +73,10 @@ const ViewRouter: React.FC<ViewRouterProps> = ({
   onAddLeads,
   onAddActivity,
   onUpdateGoals,
-  onUpdateStrategies,
+  onAddStrategy,
+  onUpdateStrategy,
+  onDeleteStrategy,
+  onReorderStrategies,
   onOpenUpload: _onOpenUpload,
 }) => {
   const { currentView, selectedLeadId, navigate, navigateToLead, goBack } = useNavigation();
@@ -147,7 +153,13 @@ const ViewRouter: React.FC<ViewRouterProps> = ({
 
       {currentView === 'strategies' && (
         <ViewTransition>
-          <StrategyManager strategies={strategies} onUpdate={onUpdateStrategies} />
+          <StrategyManager
+            strategies={strategies}
+            onAddStrategy={onAddStrategy}
+            onUpdateStrategy={onUpdateStrategy}
+            onDeleteStrategy={onDeleteStrategy}
+            onReorderStrategies={onReorderStrategies}
+          />
         </ViewTransition>
       )}
 

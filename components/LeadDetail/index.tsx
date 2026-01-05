@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ArrowLeft, Trash2, MessageCircle, ChevronDown, Check } from 'lucide-react';
-import { Lead, Strategy, Activity, LeadStatus, TaskAction } from '../../types';
+import { ArrowLeft, Trash2, MessageCircle, ChevronDown, Check, XCircle, Edit3 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Lead, Strategy, Activity, LeadStatus, TaskAction, LostReason, LOST_REASON_LABELS } from '../../types';
 
 const STATUS_OPTIONS: { status: LeadStatus; label: string; color: string }[] = [
   { status: 'not_contacted', label: 'Not Contacted', color: 'bg-gray-100 text-gray-600' },
@@ -8,21 +9,26 @@ const STATUS_OPTIONS: { status: LeadStatus; label: string; color: string }[] = [
   { status: 'replied', label: 'Replied', color: 'bg-pilot-blue/10 text-pilot-blue' },
   { status: 'qualified', label: 'Qualified', color: 'bg-pilot-blue/10 text-pilot-blue' },
   { status: 'disqualified', label: 'Disqualified', color: 'bg-rose-50 text-rose-600' },
+  { status: 'no_reply', label: 'No Reply', color: 'bg-slate-100 text-slate-500' },
 ];
 import ConfirmModal from '../ConfirmModal';
 import LeadInfoColumn from './LeadInfoColumn';
 import StrategySection from './StrategySection';
+import CustomFieldsSection from './CustomFieldsSection';
 import ActivityFeed, { actionToChannel, ComposerChannel } from './ActivityFeed';
 import LogReplyModal from '../LogReplyModal';
 import RescheduleModal from '../RescheduleModal';
+import DisqualifyModal from '../DisqualifyModal';
 import LoadingSpinner from '../LoadingSpinner';
 import { ErrorState } from '../ui/ErrorState';
 import { useAuth } from '../../hooks/useAuth';
 import { useLeadQuery } from '../../hooks/queries/useLeadQuery';
 import { useToast } from '../Toast';
+import { queryKeys } from '../../lib/queryClient';
 // Note: Full calling functionality with call records is in TaskQueue/CallProcessingPanel
 // Here we just check if Twilio is configured and direct users there
 import { useTwilioDevice } from '../../hooks/useTwilioDevice';
+import { startReplySequence } from '../../services/supabase';
 
 interface LeadDetailProps {
   leadId: string;
@@ -50,12 +56,14 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
 }) => {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const { deviceStatus } = useTwilioDevice();
   const twilioReady = deviceStatus === 'ready';
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showReplyModal, setShowReplyModal] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [showDisqualifyModal, setShowDisqualifyModal] = useState(false);
   const [composerChannel, setComposerChannel] = useState<ComposerChannel>('note');
   const activityFeedRef = useRef<HTMLDivElement>(null);
   const statusDropdownRef = useRef<HTMLDivElement>(null);
@@ -89,14 +97,49 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   const handleStatusChange = useCallback(
     async (newStatus: LeadStatus) => {
       if (!lead) return;
-      const isTerminal = newStatus === 'qualified' || newStatus === 'disqualified' || newStatus === 'replied';
+
+      // Intercept disqualified status to show modal for reason selection
+      if (newStatus === 'disqualified') {
+        setShowStatusDropdown(false);
+        setShowDisqualifyModal(true);
+        return;
+      }
+
+      // Intercept replied status to show LogReplyModal (so user can specify platform and trigger reply sequence)
+      if (newStatus === 'replied' && lead.status !== 'replied') {
+        setShowStatusDropdown(false);
+        setShowReplyModal(true);
+        return;
+      }
+
+      const isTerminal = newStatus === 'qualified' || newStatus === 'replied' || newStatus === 'no_reply';
       await onUpdate({
         ...lead,
         status: newStatus,
         nextTaskDate: isTerminal ? undefined : lead.nextTaskDate,
+        // Clear lost reason when changing away from disqualified
+        lostReason: undefined,
+        lostReasonNote: undefined,
       });
       await onAddActivity(lead.id, `Lead status changed to: ${newStatus.replace('_', ' ')}`);
       setShowStatusDropdown(false);
+    },
+    [lead, onUpdate, onAddActivity]
+  );
+
+  const handleDisqualify = useCallback(
+    async (reason: LostReason, note?: string) => {
+      if (!lead) return;
+      await onUpdate({
+        ...lead,
+        status: 'disqualified',
+        nextTaskDate: undefined,
+        lostReason: reason,
+        lostReasonNote: note,
+      });
+      const reasonLabel = LOST_REASON_LABELS[reason];
+      const activityNote = note ? `${reasonLabel}: ${note}` : reasonLabel;
+      await onAddActivity(lead.id, `Lead disqualified - ${activityNote}`);
     },
     [lead, onUpdate, onAddActivity]
   );
@@ -130,6 +173,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     const isLastStep = nextStepIndex >= activeStrategy.steps.length;
 
     let nextTaskDate: string | undefined = undefined;
+    let strategyCompletedAt: string | undefined = lead.strategyCompletedAt;
+
     if (!isLastStep) {
       const nextStep = activeStrategy.steps[nextStepIndex];
       if (nextStep) {
@@ -137,18 +182,28 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         date.setDate(date.getDate() + (nextStep.dayOffset - currentStep.dayOffset));
         nextTaskDate = date.toISOString();
       }
+    } else {
+      // Last step completed - mark strategy as completed, waiting for no-reply timeout
+      strategyCompletedAt = new Date().toISOString();
+      // Keep status as 'in_progress' - background job will change to 'no_reply' after delay
     }
 
     const updatedLead: Lead = {
       ...lead,
       currentStepIndex: nextStepIndex,
       nextTaskDate: nextTaskDate,
-      status: isLastStep ? 'replied' : 'in_progress',
+      strategyCompletedAt: strategyCompletedAt,
+      status: 'in_progress', // Always stay in_progress - terminal changes come from replies or background job
     };
 
     onUpdate(updatedLead);
     onAddActivity(lead.id, `Step completed: ${currentStep.action}`, `Marked as done from detail view.`);
-    showToast('Step completed! Moving to next step.', 'success');
+
+    if (isLastStep) {
+      showToast('Strategy completed! Lead will be marked as "No Reply" if no response received.', 'success');
+    } else {
+      showToast('Step completed! Moving to next step.', 'success');
+    }
   }, [lead, activeStrategy, currentStep, onUpdate, onAddActivity, showToast]);
 
   const handleSwitchStrategy = useCallback(() => {
@@ -202,20 +257,23 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
     ) => {
       if (!lead) return;
 
-      const actionLabel = platform
-        ? `${platform.charAt(0).toUpperCase() + platform.slice(1)} Log`
-        : 'Manual Note';
-      onAddActivity(lead.id, actionLabel, note, false, platform);
+      // Only log activity if note is provided
+      if (note.trim()) {
+        const actionLabel = platform
+          ? `${platform.charAt(0).toUpperCase() + platform.slice(1)} Log`
+          : 'Manual Note';
+        onAddActivity(lead.id, actionLabel, note, false, platform);
 
-      // Auto-advance strategy if activity matches current step
-      if (activeStrategy && currentStep && platform) {
-        const expectedChannel = actionToChannel(currentStep.action);
-        if (platform === expectedChannel || (expectedChannel === 'instagram' && platform === 'instagram')) {
-          handleCompleteCurrentStep();
+        // Auto-advance strategy if activity matches current step
+        if (activeStrategy && currentStep && platform) {
+          const expectedChannel = actionToChannel(currentStep.action);
+          if (platform === expectedChannel || (expectedChannel === 'instagram' && platform === 'instagram')) {
+            handleCompleteCurrentStep();
+          }
         }
       }
 
-      // Handle follow-up scheduling
+      // Handle follow-up scheduling (independent of note)
       if (scheduleFollowUp) {
         let nextDate: Date;
         if (scheduleFollowUp.customDate) {
@@ -226,6 +284,13 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         } else {
           return;
         }
+
+        // Log activity for the scheduled follow-up
+        onAddActivity(
+          lead.id,
+          'Follow-up scheduled',
+          scheduleFollowUp.note || `Scheduled for ${nextDate.toLocaleString()}`
+        );
 
         onUpdate({
           ...lead,
@@ -240,8 +305,8 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
   );
 
   const handleLogReply = useCallback(
-    (data: { platform: Activity['platform']; note: string; updateStatus: boolean }) => {
-      if (!lead || !data.platform) return;
+    async (data: { platform: Activity['platform']; note: string; updateStatus: boolean }) => {
+      if (!lead || !data.platform || !user) return;
       const platformLabel = data.platform.charAt(0).toUpperCase() + data.platform.slice(1);
       const actionLabel = `Reply via ${platformLabel}`;
       onAddActivity(lead.id, actionLabel, data.note || undefined, false, data.platform, 'inbound');
@@ -249,8 +314,23 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       if (data.updateStatus && lead.status !== 'replied' && lead.status !== 'qualified') {
         onUpdate({ ...lead, status: 'replied' });
       }
+
+      // Start reply sequence if strategy has one configured
+      if (activeStrategy?.replySequence && activeStrategy.replySequence.length > 0) {
+        try {
+          await startReplySequence(lead.id, user.id, data.platform, activeStrategy);
+          const stepCount = activeStrategy.replySequence.length;
+          showToast(`Reply sequence started (${stepCount} ${stepCount === 1 ? 'step' : 'steps'})`, 'success');
+          // Invalidate task queries so the new reply sequence task appears
+          queryClient.invalidateQueries({ queryKey: queryKeys.tasks(user.id) });
+          queryClient.invalidateQueries({ queryKey: queryKeys.tasksAllScheduled(user.id) });
+        } catch (err) {
+          console.error('Failed to start reply sequence:', err);
+          // Don't block the reply logging - sequence is optional
+        }
+      }
     },
-    [lead, onAddActivity, onUpdate]
+    [lead, user, activeStrategy, onAddActivity, onUpdate, showToast, queryClient]
   );
 
   const handleReschedule = useCallback(
@@ -382,6 +462,22 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Lost Reason Display - shown when disqualified */}
+              {lead.status === 'disqualified' && lead.lostReason && (
+                <button
+                  onClick={() => setShowDisqualifyModal(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200/50 hover:bg-rose-100 transition-colors group"
+                  title="Click to edit lost reason"
+                >
+                  <XCircle size={14} />
+                  <span>
+                    {LOST_REASON_LABELS[lead.lostReason]}
+                    {lead.lostReasonNote && `: ${lead.lostReasonNote}`}
+                  </span>
+                  <Edit3 size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -397,7 +493,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
               />
             </div>
 
-            {/* Right Column: Strategy (2/5) */}
+            {/* Right Column: Strategy + Custom Fields (2/5) */}
             <div className="lg:col-span-2 p-6 bg-gray-50/50">
               <StrategySection
                 lead={lead}
@@ -410,6 +506,17 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
                 onReschedule={() => setShowRescheduleModal(true)}
                 embedded
               />
+
+              {/* Divider */}
+              <div className="my-6 border-t border-gray-200/60" />
+
+              {/* Custom Fields */}
+              <div>
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">
+                  Custom Fields
+                </h4>
+                <CustomFieldsSection leadId={lead.id} />
+              </div>
             </div>
           </div>
         </div>
@@ -441,6 +548,7 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
       <LogReplyModal
         isOpen={showReplyModal}
         leadName={lead.companyName}
+        strategy={activeStrategy}
         onClose={() => setShowReplyModal(false)}
         onSubmit={handleLogReply}
       />
@@ -453,6 +561,15 @@ const LeadDetail: React.FC<LeadDetailProps> = ({
         onReschedule={(newDate: Date) => {
           handleReschedule(null, newDate.toISOString());
         }}
+      />
+
+      <DisqualifyModal
+        isOpen={showDisqualifyModal}
+        leadName={lead.companyName}
+        currentReason={lead.lostReason}
+        currentNote={lead.lostReasonNote}
+        onClose={() => setShowDisqualifyModal(false)}
+        onDisqualify={handleDisqualify}
       />
     </>
   );

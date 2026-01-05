@@ -49,7 +49,7 @@ const AppContent: React.FC = () => {
   const { addLeads, updateLead, deleteLead } = usePaginatedLeadMutations(userId);
 
   const { activities, addActivity: addActivityToDb } = useActivities(userId);
-  const { strategies, loading: strategiesLoading, updateStrategies } = useStrategies(userId);
+  const { strategies, loading: strategiesLoading, addStrategy, updateStrategy, deleteStrategy, reorderStrategies } = useStrategies(userId);
   const { goals, updateGoals } = useGoals(userId);
   const { showToast } = useToast();
 
@@ -199,7 +199,10 @@ const AppContent: React.FC = () => {
         onAddLeads={handleAddLeads}
         onAddActivity={handleAddActivity}
         onUpdateGoals={updateGoals}
-        onUpdateStrategies={updateStrategies}
+        onAddStrategy={addStrategy}
+        onUpdateStrategy={updateStrategy}
+        onDeleteStrategy={deleteStrategy}
+        onReorderStrategies={reorderStrategies}
         onOpenUpload={() => setIsUploadOpen(true)}
       />
 

@@ -33,7 +33,7 @@ export const queryKeys = {
   activities: (userId: string) => ['activities', userId] as const,
   activitiesByLead: (userId: string, leadId: string) =>
     ['activities', userId, 'byLead', leadId] as const,
-  activitiesPaginated: (userId: string | undefined, options: { startDate?: string; endDate?: string; limit?: number }) =>
+  activitiesPaginated: (userId: string | undefined, options: { startDate?: string; endDate?: string; limit?: number; firstOutreachOnly?: boolean }) =>
     ['activities', userId, 'paginated', options] as const,
 
   // Lead Counts
@@ -131,6 +131,10 @@ export const queryKeys = {
     ['customFields', userId, 'values'] as const,
   customFieldHasValues: (userId: string | undefined, fieldId: string) =>
     ['customFields', userId, 'hasValues', fieldId] as const,
+
+  // Pipeline Preferences (column visibility)
+  pipelinePreferences: (userId: string | undefined) =>
+    ['pipelinePreferences', userId] as const,
 } as const;
 
 // Helper for invalidating related queries

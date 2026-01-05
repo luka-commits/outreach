@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse } from "../_shared/cors.ts"
-import { encrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
+import { encrypt, requireEncryption } from "../_shared/encryption.ts"
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -121,22 +121,30 @@ serve(async (req) => {
     // 7. Calculate expiration timestamp
     const expiresAt = new Date(Date.now() + expires_in * 1000).toISOString();
 
-    // 8. Store credentials in profiles table (encrypted if configured)
-    let accessTokenToStore = access_token;
-    let refreshTokenToStore = refresh_token;
+    // 8. Store credentials in profiles table (MUST be encrypted)
+    // SECURITY: Require encryption - never store OAuth tokens in plaintext
+    try {
+      requireEncryption();
+    } catch {
+      console.error('Encryption not configured');
+      return new Response(JSON.stringify({ error: 'Server configuration error. Please contact support.' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500,
+      });
+    }
 
-    if (isEncryptionConfigured()) {
-      try {
-        accessTokenToStore = await encrypt(access_token);
-        refreshTokenToStore = await encrypt(refresh_token);
-      } catch (encryptError) {
-        // Log error but don't expose details to client
-        console.error('Encryption failed');
-        return new Response(JSON.stringify({ error: 'Failed to secure credentials' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 500,
-        });
-      }
+    let accessTokenToStore: string;
+    let refreshTokenToStore: string;
+    try {
+      accessTokenToStore = await encrypt(access_token);
+      refreshTokenToStore = await encrypt(refresh_token);
+    } catch (encryptError) {
+      // Log error but don't expose details to client
+      console.error('Encryption failed');
+      return new Response(JSON.stringify({ error: 'Failed to secure credentials' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500,
+      });
     }
 
     const { error: updateError } = await supabaseAdmin

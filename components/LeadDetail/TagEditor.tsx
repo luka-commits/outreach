@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, X, Check, Palette, Pencil, Trash2, Tag } from 'lucide-react';
 import { LeadTag } from '../../types';
 import {
@@ -51,7 +52,9 @@ const TagEditor: React.FC<TagEditorProps> = ({ leadId }) => {
   const [editingTagColor, setEditingTagColor] = useState('#3B82F6');
   const [showEditColorPicker, setShowEditColorPicker] = useState(false);
   const [deleteConfirmTagId, setDeleteConfirmTagId] = useState<string | null>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   // Queries
   const { data: allTags = [], isLoading: loadingTags } = useLeadTagsQuery(userId);
@@ -79,6 +82,17 @@ const TagEditor: React.FC<TagEditorProps> = ({ leadId }) => {
   }, []);
 
   const assignedTagIds = new Set(assignedTags.map(t => t.id));
+
+  const handleOpenDropdown = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 8,
+        left: rect.left,
+      });
+    }
+    setIsOpen(true);
+  };
 
   const handleCreateAndAssign = async () => {
     if (!newTagName.trim()) return;
@@ -195,7 +209,8 @@ const TagEditor: React.FC<TagEditorProps> = ({ leadId }) => {
 
         {/* Add Tag Button */}
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          ref={buttonRef}
+          onClick={() => isOpen ? setIsOpen(false) : handleOpenDropdown()}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
             isOpen
               ? 'bg-slate-200 text-slate-700'
@@ -207,9 +222,18 @@ const TagEditor: React.FC<TagEditorProps> = ({ leadId }) => {
         </button>
       </div>
 
-      {/* Dropdown */}
-      {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200/80 z-50 animate-in fade-in slide-in-from-top-2 duration-200 overflow-hidden">
+      {/* Dropdown - rendered via Portal to escape overflow-hidden */}
+      {isOpen && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'fixed',
+            top: dropdownPosition.top,
+            left: dropdownPosition.left,
+            zIndex: 9999,
+          }}
+          className="w-72 bg-white rounded-2xl shadow-2xl border border-slate-200/80 animate-in fade-in slide-in-from-top-2 duration-200 overflow-hidden"
+        >
           {/* Create New Tag Section - Vertical Layout */}
           <div className="p-4 bg-gradient-to-b from-slate-50 to-white">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-3">
@@ -403,7 +427,8 @@ const TagEditor: React.FC<TagEditorProps> = ({ leadId }) => {
               <p className="text-slate-400 text-xs mt-1">Create your first tag above</p>
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Delete Confirmation Modal */}

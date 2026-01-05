@@ -1,7 +1,7 @@
 # ARCHITECTURE.md - Outbound Pilot
 
-> **Last Updated**: 2026-01-03
-> **Version**: 1.3.0
+> **Last Updated**: 2026-01-05
+> **Version**: 1.4.0
 
 ## How to Keep This File Current
 
@@ -20,6 +20,7 @@
 
 | Date       | Change                                                        |
 |------------|---------------------------------------------------------------|
+| 2026-01-05 | **Pipeline Tag Filtering & Column Visibility**: Filter leads by tags in Pipeline view. Customizable column visibility (hide/show any column including custom fields). Column preferences persisted to database. Added `pipeline_preferences` table, `ColumnVisibilityDropdown` component, `usePipelinePreferencesQuery` hook. Extended `LeadFilters` with `tagIds`. |
 | 2026-01-04 | **Strategy Colors**: User-selectable colors for strategies. Removed redundant Zap icons in favor of colored indicators. Colors propagate consistently across TaskQueue, LeadList, LeadDetail, StrategyManager, and BulkStrategyModal. Added `color` field to strategies table, `strategyColors` in designTokens, `getStrategyColor()` helper. |
 | 2026-01-04 | **CSV Column Mapping**: Added manual column mapping step to CSV import with AI-assisted detection. Users can now review/adjust auto-detected mappings before import. Added `CSVColumnMapper` component, `detectColumnMappings()` in geminiService, and `LeadField` type. |
 | 2026-01-04 | **Custom Fields**: User-defined custom fields for leads with 7 field types (text, number, date, single/multi-select, checkbox, URL). Added `custom_field_definitions` and `custom_field_values` tables. Settings UI for field management, Lead Detail accordion with inline field creation/rename/delete. |
@@ -97,7 +98,8 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
 │   │   ├── useReportingQueries.ts     # Stale leads, channel stats, trends, overdue
 │   │   ├── useNetworkingQuery.ts      # Public profiles, metrics, leaderboard
 │   │   ├── useScrapeUsageQuery.ts     # Monthly scrape usage for free tier limits
-│   │   └── useCustomFieldsQuery.ts    # Custom field definitions and values
+│   │   ├── useCustomFieldsQuery.ts    # Custom field definitions and values
+│   │   └── usePipelinePreferencesQuery.ts # Column visibility preferences
 │   ├── useAuth.tsx              # Auth context & provider
 │   ├── useSubscription.ts       # Tier & limits, realtime refresh
 │   └── useTwilioDevice.ts       # WebRTC device management
@@ -213,7 +215,8 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
     ├── 20260103_fix_score_index.sql                # Fix orphaned index
     ├── 20260103_add_composite_indexes.sql          # Performance indexes for call_records & lead_notes
     ├── 20260103_add_networking_features.sql        # Public profiles, activity metrics, leaderboard RPCs
-    └── 20260104_add_custom_fields.sql              # User-defined custom fields for leads
+    ├── 20260104_add_custom_fields.sql              # User-defined custom fields for leads
+    └── 20260107_add_pipeline_preferences.sql       # Pipeline column visibility preferences
 ```
 
 ---
@@ -352,6 +355,14 @@ Components
 | value_date | date | For date |
 | value_boolean | bool | For checkbox |
 | value_array | text[] | For multi_select |
+
+**pipeline_preferences** — User column visibility preferences
+| Column | Type | Notes |
+|--------|------|-------|
+| id, user_id | uuid | Standard (user_id is UNIQUE) |
+| visible_columns | text[] | Built-in column keys |
+| visible_custom_fields | uuid[] | Custom field IDs to show |
+| column_order | text[] | Optional drag-reorder (future) |
 
 ### Key Relationships
 

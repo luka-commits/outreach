@@ -22,13 +22,13 @@ export function useActivitiesQuery(userId: string | undefined) {
  */
 export function useActivitiesPaginatedQuery(
   userId: string | undefined,
-  options: { startDate?: string; endDate?: string; limit?: number } = {}
+  options: { startDate?: string; endDate?: string; limit?: number; firstOutreachOnly?: boolean } = {}
 ) {
-  const { startDate, endDate, limit = 1000 } = options;
+  const { startDate, endDate, limit = 1000, firstOutreachOnly } = options;
 
   return useQuery({
-    queryKey: queryKeys.activitiesPaginated(userId, { startDate, endDate, limit }),
-    queryFn: () => api.getActivitiesPaginated(userId!, { startDate, endDate, limit, offset: 0 }),
+    queryKey: queryKeys.activitiesPaginated(userId, { startDate, endDate, limit, firstOutreachOnly }),
+    queryFn: () => api.getActivitiesPaginated(userId!, { startDate, endDate, limit, offset: 0, firstOutreachOnly }),
     enabled: !!userId,
     select: (response) => response.data, // Just return the activities array
   });
@@ -64,6 +64,7 @@ export function useDashboardActivities(
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
     limit: 10000, // High limit for dashboard stats
+    firstOutreachOnly: true, // Only count first outreach activities for goals
   });
 }
 

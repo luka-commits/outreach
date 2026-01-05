@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts"
 import { validateTwilioSignature } from "../_shared/twilioValidation.ts"
-import { safeDecrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
+import { safeDecrypt, requireEncryption } from "../_shared/encryption.ts"
 
 // Generate AI summary using Gemini (currently unused but kept for future use)
 async function generateAISummary(transcription: string): Promise<string> {
@@ -117,17 +117,23 @@ serve(async (req) => {
       });
     }
 
-    // Decrypt auth token if encryption is configured
-    let authToken: string = profile.twilio_auth_token;
-    if (isEncryptionConfigured()) {
-      const decrypted = await safeDecrypt(profile.twilio_auth_token);
-      if (!decrypted) {
-        // Can't decrypt - return success to prevent Twilio retries
-        return new Response(JSON.stringify({ success: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-      authToken = decrypted;
+    // Decrypt auth token (REQUIRED - credentials must be encrypted)
+    try {
+      requireEncryption();
+    } catch {
+      console.error('Encryption not configured');
+      // Return success to prevent Twilio retries, but log the error
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const authToken = await safeDecrypt(profile.twilio_auth_token);
+    if (!authToken) {
+      // Can't decrypt - return success to prevent Twilio retries
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // SECURITY: Validate Twilio webhook signature

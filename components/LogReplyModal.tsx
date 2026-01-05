@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { X, MessageCircle, Mail, Phone, Instagram, Facebook, Linkedin, Footprints, Check } from 'lucide-react';
-import { Activity } from '../types';
+import { X, MessageCircle, Mail, Phone, Instagram, Facebook, Linkedin, Footprints, Check, Reply } from 'lucide-react';
+import { Activity, Strategy } from '../types';
+import { getActionLabel, platformToAction } from '../services/supabase';
 
 interface LogReplyModalProps {
   isOpen: boolean;
   leadName: string;
+  strategy?: Strategy | null;  // Optional - to show follow-up preview
   onClose: () => void;
   onSubmit: (data: {
     platform: Activity['platform'];
@@ -25,6 +27,7 @@ const PLATFORMS: { value: Activity['platform']; label: string; icon: React.React
 const LogReplyModal: React.FC<LogReplyModalProps> = ({
   isOpen,
   leadName,
+  strategy,
   onClose,
   onSubmit,
 }) => {
@@ -141,6 +144,35 @@ const LogReplyModal: React.FC<LogReplyModalProps> = ({
               </p>
             </div>
           </label>
+
+          {/* Reply Sequence Preview - shown when strategy has reply sequence configured */}
+          {strategy?.replySequence && strategy.replySequence.length > 0 && platform && (
+            <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-100">
+              <div className="flex items-center gap-2 text-emerald-700 text-sm font-medium mb-2">
+                <Reply size={16} />
+                <span>Reply sequence will start</span>
+              </div>
+              <div className="space-y-1.5">
+                {strategy.replySequence.slice(0, 3).map((step, idx) => (
+                  <div key={idx} className="flex items-center gap-2 text-xs text-emerald-600">
+                    <div className="w-4 h-4 rounded-full bg-emerald-200 flex items-center justify-center text-[10px] font-bold text-emerald-700">
+                      {idx + 1}
+                    </div>
+                    <span>
+                      {step.dayOffset === 0 ? 'Immediate' : `Day ${step.dayOffset}`}
+                    </span>
+                    <span className="text-emerald-400">•</span>
+                    <span>{getActionLabel(platformToAction(platform))}</span>
+                  </div>
+                ))}
+                {strategy.replySequence.length > 3 && (
+                  <div className="text-xs text-emerald-500 pl-6">
+                    +{strategy.replySequence.length - 3} more steps
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}

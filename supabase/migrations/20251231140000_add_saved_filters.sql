@@ -18,15 +18,19 @@ CREATE TABLE IF NOT EXISTS public.saved_filters (
 ALTER TABLE public.saved_filters ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
+DROP POLICY IF EXISTS "Users can view own saved filters" ON public.saved_filters;
 CREATE POLICY "Users can view own saved filters" ON public.saved_filters
   FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own saved filters" ON public.saved_filters;
 CREATE POLICY "Users can insert own saved filters" ON public.saved_filters
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own saved filters" ON public.saved_filters;
 CREATE POLICY "Users can update own saved filters" ON public.saved_filters
   FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own saved filters" ON public.saved_filters;
 CREATE POLICY "Users can delete own saved filters" ON public.saved_filters
   FOR DELETE USING (auth.uid() = user_id);
 

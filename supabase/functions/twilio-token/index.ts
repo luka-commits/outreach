@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse } from "../_shared/cors.ts"
-import { safeDecrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
+import { safeDecrypt, requireEncryption } from "../_shared/encryption.ts"
 
 // Simple JWT generation for Twilio Access Token
 // This is a minimal implementation - Twilio SDK would be better but Deno compatibility is limited
@@ -149,17 +149,23 @@ serve(async (req) => {
     const accountSid = profile.twilio_account_sid;
     const twimlAppSid = profile.twilio_twiml_app_sid;
 
-    // Decrypt auth token if encryption is configured
-    let authToken: string = profile.twilio_auth_token;
-    if (isEncryptionConfigured()) {
-      const decrypted = await safeDecrypt(profile.twilio_auth_token);
-      if (!decrypted) {
-        return new Response(JSON.stringify({ error: 'Twilio credentials corrupted. Please reconfigure in Settings.' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400,
-        });
-      }
-      authToken = decrypted;
+    // Decrypt auth token (REQUIRED - credentials must be encrypted)
+    try {
+      requireEncryption();
+    } catch {
+      console.error('Encryption not configured');
+      return new Response(JSON.stringify({ error: 'Server configuration error. Please contact support.' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500,
+      });
+    }
+
+    const authToken = await safeDecrypt(profile.twilio_auth_token);
+    if (!authToken) {
+      return new Response(JSON.stringify({ error: 'Twilio credentials corrupted. Please reconfigure in Settings.' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400,
+      });
     }
 
     // Use account SID as API Key SID for simplicity (works with Auth Token)

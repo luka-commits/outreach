@@ -256,14 +256,29 @@ async function extractWithAI(
 ): Promise<ExtractedLeadData | null> {
   const prompt = `Extract business information from this website content. Return a JSON object with these fields:
 - companyName: Official business name (required)
-- contactName: Owner or contact person name if found
+- contactName: Owner, founder, or primary contact person's FULL NAME (first and last name)
 - email: Primary business email (choose most relevant from list)
-- phone: Primary business phone number
-- address: Physical business address if found
-- location: City, State/Country
-- niche: Business category/industry
+- phone: Primary business phone number (format exactly as shown on website)
+- address: Full physical business address including street, city, state/province, postal code
+- location: City and State/Country (e.g. "Sydney, NSW" or "Melbourne, Australia")
+- niche: Business category/industry (e.g. "Plumbing", "Restaurant", "Law Firm")
 
-Only include fields you can confidently extract. Return null for uncertain fields.
+IMPORTANT - Finding the contact/owner name:
+- Look for "About Us", "Meet the Team", "Our Story", "About the Owner" sections
+- Check for names near titles like "Owner", "Founder", "Director", "Principal", "CEO", "Proprietor"
+- Look for testimonial attributions or "Message from the owner"
+- Check the footer for owner/manager names
+- For small businesses, the person featured prominently is often the owner
+- Email addresses sometimes contain names (e.g. john.smith@company.com = John Smith)
+
+IMPORTANT - Finding location information:
+- Footer sections (commonly contains address)
+- Contact pages
+- "About Us" sections
+- Service area mentions (e.g. "Serving Sydney and surrounding areas")
+- Phone number area codes can hint at location
+
+Return null only if information is truly not present. Make reasonable inferences from context.
 Return ONLY the JSON object, no other text.
 
 Website URL: ${url}

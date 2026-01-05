@@ -151,6 +151,11 @@ export const statusColors = {
     text: 'text-rose-600',
     border: 'border-rose-200/50',
   },
+  no_reply: {
+    bg: 'bg-slate-100',
+    text: 'text-slate-500',
+    border: 'border-slate-200/50',
+  },
 } as const;
 
 // Strategy colors - user-selectable colors for strategies

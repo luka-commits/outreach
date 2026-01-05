@@ -5,8 +5,11 @@ ALTER TABLE activities ADD COLUMN IF NOT EXISTS direction text DEFAULT 'outbound
 
 -- Add a check constraint to ensure valid values
 -- Note: Using CHECK constraint for data integrity
-ALTER TABLE activities ADD CONSTRAINT activities_direction_check
-  CHECK (direction IN ('outbound', 'inbound'));
+DO $$ BEGIN
+  ALTER TABLE activities ADD CONSTRAINT activities_direction_check
+    CHECK (direction IN ('outbound', 'inbound'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Create index for filtering by direction
 CREATE INDEX IF NOT EXISTS idx_activities_direction ON activities(direction);

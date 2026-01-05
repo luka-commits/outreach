@@ -14,15 +14,19 @@ CREATE TABLE IF NOT EXISTS lead_notes (
 ALTER TABLE lead_notes ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for lead_notes
+DROP POLICY IF EXISTS "Users can view own notes" ON lead_notes;
 CREATE POLICY "Users can view own notes" ON lead_notes
   FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert own notes" ON lead_notes;
 CREATE POLICY "Users can insert own notes" ON lead_notes
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update own notes" ON lead_notes;
 CREATE POLICY "Users can update own notes" ON lead_notes
   FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete own notes" ON lead_notes;
 CREATE POLICY "Users can delete own notes" ON lead_notes
   FOR DELETE USING (auth.uid() = user_id);
 
@@ -40,6 +44,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS lead_notes_updated_at_trigger ON lead_notes;
 CREATE TRIGGER lead_notes_updated_at_trigger
   BEFORE UPDATE ON lead_notes
   FOR EACH ROW

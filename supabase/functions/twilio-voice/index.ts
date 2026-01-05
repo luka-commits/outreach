@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts"
 import { validateTwilioSignature } from "../_shared/twilioValidation.ts"
-import { safeDecrypt, isEncryptionConfigured } from "../_shared/encryption.ts"
+import { safeDecrypt, requireEncryption } from "../_shared/encryption.ts"
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -86,24 +86,36 @@ serve(async (req) => {
 
     // SECURITY: Validate Twilio webhook signature
     if (profile.twilio_auth_token) {
-      // Decrypt auth token if encryption is configured
-      let authToken: string = profile.twilio_auth_token;
-      if (isEncryptionConfigured()) {
-        const decrypted = await safeDecrypt(profile.twilio_auth_token);
-        if (!decrypted) {
-          // Can't decrypt - reject the request
-          return new Response(
-            `<?xml version="1.0" encoding="UTF-8"?>
+      // Decrypt auth token (REQUIRED - credentials must be encrypted)
+      try {
+        requireEncryption();
+      } catch {
+        console.error('Encryption not configured');
+        return new Response(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Server configuration error. Please contact support.</Say>
+  <Hangup/>
+</Response>`,
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+          }
+        );
+      }
+
+      const authToken = await safeDecrypt(profile.twilio_auth_token);
+      if (!authToken) {
+        // Can't decrypt - reject the request
+        return new Response(
+          `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say>Configuration error. Please reconfigure your account.</Say>
   <Hangup/>
 </Response>`,
-            {
-              headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
-            }
-          );
-        }
-        authToken = decrypted;
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+          }
+        );
       }
 
       const webhookUrl = `${supabaseUrl}/functions/v1/twilio-voice`;
