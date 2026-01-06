@@ -5,7 +5,6 @@ import SetupPromptBanner from './settings/SetupPromptBanner';
 import AccountTab from './settings/AccountTab';
 import CallingTab from './settings/CallingTab';
 import EmailTab from './settings/EmailTab';
-import LeadFinderTab from './settings/LeadFinderTab';
 import CustomFieldsTab from './settings/CustomFieldsTab';
 import TwilioSetupWizard from './TwilioSetupWizard';
 import { useHasTwilioConfigured } from '../hooks/queries/useTwilioCredentialsQuery';
@@ -41,8 +40,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, onOpenPricing }) =
         return <CallingTab onOpenWizard={() => setShowTwilioWizard(true)} />;
       case 'email':
         return <EmailTab />;
-      case 'lead-finder':
-        return <LeadFinderTab />;
       case 'custom-fields':
         return <CustomFieldsTab />;
       default:

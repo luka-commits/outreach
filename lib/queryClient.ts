@@ -48,10 +48,6 @@ export const queryKeys = {
   // Goals
   goals: (userId: string) => ['goals', userId] as const,
 
-  // Scrape Jobs
-  scrapeJobs: (userId: string) => ['scrape-jobs', userId] as const,
-  scrapeJob: (userId: string, jobId: string) => ['scrape-jobs', userId, jobId] as const,
-
   // Call Records
   callRecords: (userId: string | undefined) => ['callRecords', userId] as const,
   callRecordsByLead: (userId: string | undefined, leadId: string) =>
@@ -106,8 +102,7 @@ export const queryKeys = {
   // Subscription
   subscription: (userId: string | undefined) => ['subscription', userId] as const,
 
-  // Scrape Usage (monthly limit tracking)
-  scrapeUsage: (userId: string | undefined) => ['scrapeUsage', userId] as const,
+  // URL Scrape Usage (Quick Import monthly limit tracking)
   urlScrapeUsage: (userId: string | undefined) => ['urlScrapeUsage', userId] as const,
 
   // Networking / Leaderboard

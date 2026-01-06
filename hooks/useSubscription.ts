@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useAuth } from './useAuth';
-import { supabase } from '../services/supabase';
+import { supabase, cancelSubscription } from '../services/supabase';
 import { queryKeys } from '../lib/queryClient';
 
 export interface Subscription {
@@ -10,6 +10,7 @@ export interface Subscription {
     periodEnd: string | null;
     customerId: string | null;
     trialEndsAt: string | null;
+    cancelAtPeriodEnd: boolean;
 }
 
 // Feature limits for free tier
@@ -68,7 +69,7 @@ export function useSubscription() {
         queryFn: async (): Promise<Subscription> => {
             const { data, error } = await supabase
                 .from('profiles')
-                .select('subscription_status, subscription_plan, current_period_end, stripe_customer_id, trial_ends_at')
+                .select('subscription_status, subscription_plan, current_period_end, stripe_customer_id, trial_ends_at, cancel_at_period_end')
                 .eq('id', user!.id)
                 .single();
 
@@ -80,6 +81,7 @@ export function useSubscription() {
                 periodEnd: data.current_period_end,
                 customerId: data.stripe_customer_id,
                 trialEndsAt: data.trial_ends_at,
+                cancelAtPeriodEnd: data.cancel_at_period_end || false,
             } as Subscription;
         },
         enabled: !!userId,
@@ -87,6 +89,9 @@ export function useSubscription() {
     });
 
     const isPro = subscription?.status === 'active';
+
+    // Cancellation status - user has scheduled cancellation but still has access
+    const isCancelling = isPro && subscription?.cancelAtPeriodEnd === true;
 
     // Trial-specific computed values
     const trialEndsAt = subscription?.trialEndsAt ? new Date(subscription.trialEndsAt) : null;
@@ -160,6 +165,7 @@ export function useSubscription() {
         isLoading,
         isPro,
         isTrial,
+        isCancelling,
         trialEndsAt,
         trialDaysLeft,
         hasUsedTrial,
@@ -175,4 +181,23 @@ export function useSubscription() {
             maxUrlScrapesPerMonth: isPro ? LIMITS.PRO.urlScrapesPerMonth : LIMITS.FREE.urlScrapesPerMonth,
         },
     };
+}
+
+/**
+ * Hook to cancel subscription at period end.
+ * Returns a mutation that can be called to initiate cancellation.
+ */
+export function useCancelSubscription() {
+    const queryClient = useQueryClient();
+    const { user } = useAuth();
+
+    return useMutation({
+        mutationFn: cancelSubscription,
+        onSuccess: () => {
+            // Invalidate subscription query to refetch latest status
+            if (user?.id) {
+                queryClient.invalidateQueries({ queryKey: queryKeys.subscription(user.id) });
+            }
+        },
+    });
 }

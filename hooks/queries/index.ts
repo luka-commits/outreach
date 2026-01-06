@@ -2,7 +2,6 @@
 export { useActivitiesQuery, useActivityMutations, useActivities } from './useActivitiesQuery';
 export { useStrategiesQuery, useStrategyMutations, useStrategies } from './useStrategiesQuery';
 export { useGoalsQuery, useGoalsMutations, useGoals } from './useGoalsQuery';
-export { useScrapeJobsQuery, useCreateScrapeJobMutation, useScrapeJobsRealtime, useScrapeJobs } from './useScrapeJobsQuery';
 export { useLeadsPaginatedQuery, usePaginatedLeadMutations, usePrefetchLeadsPage } from './useLeadsPaginated';
 export { useLeadCountQuery } from './useLeadCountQuery';
 
@@ -89,8 +88,6 @@ export {
   useAvgDaysOverdue,
 } from './useReportingQueries';
 
-// Scrape Usage (for free tier limits)
-export { useScrapeUsageQuery } from './useScrapeUsageQuery';
 
 // Networking / Leaderboard
 export {

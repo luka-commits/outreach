@@ -20,11 +20,13 @@
 
 | Date       | Change                                                        |
 |------------|---------------------------------------------------------------|
+| 2026-01-06 | **Lead Finder Redesign**: New Modal-based lead scraper integration. Search by business type, location, and country. Calls external Modal webhook, deduplicates, and imports leads directly. Removed old Apify-based workflow. Added `find-leads` edge function, `LeadFinder` component. Free tier: 100 leads/search, Pro: 500. |
+| 2026-01-05 | **In-App Subscription Cancellation**: Users can cancel subscriptions directly from Settings > Account (cancels at period end, keeps access until then). Added `cancel-subscription` edge function, `CancelSubscriptionModal` component, `useCancelSubscription` hook, `cancel_at_period_end` column. Updated `stripe-webhook` to sync cancellation status. |
 | 2026-01-05 | **Pipeline Tag Filtering & Column Visibility**: Filter leads by tags in Pipeline view. Customizable column visibility (hide/show any column including custom fields). Column preferences persisted to database. Added `pipeline_preferences` table, `ColumnVisibilityDropdown` component, `usePipelinePreferencesQuery` hook. Extended `LeadFilters` with `tagIds`. |
 | 2026-01-04 | **Strategy Colors**: User-selectable colors for strategies. Removed redundant Zap icons in favor of colored indicators. Colors propagate consistently across TaskQueue, LeadList, LeadDetail, StrategyManager, and BulkStrategyModal. Added `color` field to strategies table, `strategyColors` in designTokens, `getStrategyColor()` helper. |
 | 2026-01-04 | **CSV Column Mapping**: Added manual column mapping step to CSV import with AI-assisted detection. Users can now review/adjust auto-detected mappings before import. Added `CSVColumnMapper` component, `detectColumnMappings()` in geminiService, and `LeadField` type. |
 | 2026-01-04 | **Custom Fields**: User-defined custom fields for leads with 7 field types (text, number, date, single/multi-select, checkbox, URL). Added `custom_field_definitions` and `custom_field_values` tables. Settings UI for field management, Lead Detail accordion with inline field creation/rename/delete. |
-| 2026-01-03 | **Pro User Feature Gating**: Stripe webhook handler for subscription status. Free tier limits: 50 leads, 1 strategy, 100 scrapes/month. Pro-only: Reporting, CSV export. Added `stripe-webhook` edge function, `useScrapeUsageQuery`, `ProFeatureGate`, `ProBadge` components. Realtime subscription refresh. |
+| 2026-01-03 | **Pro User Feature Gating**: Stripe webhook handler for subscription status. Free tier limits: 50 leads, 1 strategy. Pro-only: Reporting, CSV export. Added `stripe-webhook` edge function, `ProFeatureGate`, `ProBadge` components. Realtime subscription refresh. |
 | 2026-01-03 | **Networking Tab**: Opt-in leaderboard with activity volume rankings, public profiles, weekly/monthly/all-time periods. Added `user_public_profiles` and `user_activity_metrics` tables with 3 new SQL RPCs. |
 | 2026-01-01 | **Reporting Redesign**: Pipeline health funnel, strategy comparison, channel performance, weekly trends chart, task health section. Removed redundant "Today's Pulse" and duplicate strategy table. Added 4 new SQL RPCs for server-side analytics. |
 | 2025-12-30 | **Security Hardening**: CORS strict mode, server-side OAuth tokens, Twilio webhook validation |
@@ -35,7 +37,6 @@
 | 2024-12-29 | Bulk actions: multi-select, delete, status change, strategy   |
 | 2024-12-29 | Email automation: Gmail OAuth + Resend integration            |
 | 2024-12-28 | Cold calling: Twilio WebRTC integration                       |
-| 2024-12-27 | Lead Finder: scrape jobs with real-time progress              |
 | 2024-12-26 | Excel-style filters, multi-column sorting                     |
 | 2024-12-25 | Auto-Stop: terminal statuses clear next_task_date             |
 
@@ -89,7 +90,6 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
 │   │   ├── useStrategiesQuery.ts
 │   │   ├── useGoalsQuery.ts
 │   │   ├── useLeadCountQuery.ts
-│   │   ├── useScrapeJobsQuery.ts
 │   │   ├── useCallRecordsQuery.ts
 │   │   ├── useTwilioCredentialsQuery.ts
 │   │   ├── useEmailSettingsQuery.ts
@@ -97,7 +97,6 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
 │   │   ├── useStrategyPerformanceQuery.ts  # Server-side analytics
 │   │   ├── useReportingQueries.ts     # Stale leads, channel stats, trends, overdue
 │   │   ├── useNetworkingQuery.ts      # Public profiles, metrics, leaderboard
-│   │   ├── useScrapeUsageQuery.ts     # Monthly scrape usage for free tier limits
 │   │   ├── useCustomFieldsQuery.ts    # Custom field definitions and values
 │   │   └── usePipelinePreferencesQuery.ts # Column visibility preferences
 │   ├── useAuth.tsx              # Auth context & provider
@@ -118,10 +117,10 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
 │   │   ├── SettingsTabs.tsx     # Tab navigation with status badges
 │   │   ├── IntegrationCard.tsx  # Reusable integration status card
 │   │   ├── SetupPromptBanner.tsx # First-time setup guidance
-│   │   ├── AccountTab.tsx       # Profile, subscription, sign out
+│   │   ├── AccountTab.tsx       # Profile, subscription, sign out, cancel subscription
+│   │   ├── CancelSubscriptionModal.tsx # Subscription cancellation confirmation
 │   │   ├── CallingTab.tsx       # Twilio cold calling setup
 │   │   ├── EmailTab.tsx         # Gmail/Resend email setup
-│   │   ├── LeadFinderTab.tsx    # API keys for scraping
 │   │   └── CustomFieldsTab.tsx  # Custom field management
 │   ├── Dashboard.tsx            # Overview, goal rings, analytics
 │   ├── LeadList.tsx             # Pipeline with filters & sorting
@@ -130,8 +129,7 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
 │   ├── StrategyManager.tsx      # Strategy CRUD
 │   ├── CSVUpload.tsx            # Bulk import (multi-step: upload → mapping → confirm)
 │   ├── CSVColumnMapper.tsx      # Column mapping UI with AI detection
-│   ├── LeadFinder.tsx           # Lead discovery UI
-│   ├── ScrapeProgressTimeline.tsx
+│   ├── LeadFinder.tsx           # Lead discovery via Modal scraper
 │   ├── LeadAddForm.tsx          # Manual lead creation
 │   ├── Reporting.tsx            # Analytics
 │   ├── Networking.tsx           # Social leaderboard & public profiles
@@ -174,10 +172,9 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
 │   │   ├── cors.ts              # CORS configuration (strict origin validation)
 │   │   ├── encryption.ts        # AES-256-GCM encryption for credentials
 │   │   └── validation.ts        # Email/phone validation, MIME sanitization
-│   ├── start-scrape/            # Initiate scrape jobs
-│   ├── scrape-callback/         # Webhook for scrape results
-│   ├── cancel-job/              # Cancel in-progress scrapes
 │   ├── import-leads/            # CSV processing
+│   ├── find-leads/              # Lead Finder: calls Modal scraper webhook
+│   ├── scrape-url/              # Quick Import: extract lead from website URL
 │   ├── verify-twilio/           # Validate Twilio credentials
 │   ├── twilio-token/            # WebRTC access token
 │   ├── twilio-voice/            # TwiML for outbound calls
@@ -185,14 +182,15 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
 │   ├── recording-ready/         # Recording webhook + transcription (validates Twilio signature)
 │   ├── gmail-oauth-callback/    # Gmail token exchange (encrypts tokens)
 │   ├── send-email/              # Email sending (Gmail + Resend, validates email format)
-│   └── stripe-webhook/          # Stripe subscription updates (validates signature)
+│   ├── stripe-webhook/          # Stripe subscription updates (validates signature)
+│   └── cancel-subscription/     # In-app subscription cancellation (cancel at period end)
 │
 └── migrations/                  # Run in order:
     ├── 20231201_initial_schema.sql
     ├── 20240101_add_subscriptions.sql
-    ├── 20251227_create_scrape_jobs.sql
-    ├── 20251228_add_api_keys_to_profiles.sql
-    ├── 20251229_fix_enhance_scrape_jobs.sql
+    ├── 20251227_create_scrape_jobs.sql            # (legacy, kept for schema reference)
+    ├── 20251228_add_api_keys_to_profiles.sql      # (legacy, kept for schema reference)
+    ├── 20251229_fix_enhance_scrape_jobs.sql       # (legacy, kept for schema reference)
     ├── 20251229_add_calling_support.sql
     ├── 20251229_add_activity_lead_index.sql
     ├── 20251229_add_loom_url_to_leads.sql
@@ -202,7 +200,7 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
     ├── 20251230_add_activity_direction.sql
     ├── 20251230_add_lead_notes.sql
     ├── 20251230_add_lead_tags.sql
-    ├── 20251231_add_scrape_job_progress.sql
+    ├── 20251231_add_scrape_job_progress.sql       # (legacy, kept for schema reference)
     ├── 20251231_add_performance_indexes.sql        # Performance indexes for scale
     ├── 20251231_add_duplicate_detection_rpc.sql    # SQL functions for duplicate detection
     ├── 20251231_add_strategy_performance_rpc.sql   # SQL functions for strategy analytics
@@ -216,7 +214,8 @@ A sales outreach management SPA for tracking leads, scheduling follow-ups, and e
     ├── 20260103_add_composite_indexes.sql          # Performance indexes for call_records & lead_notes
     ├── 20260103_add_networking_features.sql        # Public profiles, activity metrics, leaderboard RPCs
     ├── 20260104_add_custom_fields.sql              # User-defined custom fields for leads
-    └── 20260107_add_pipeline_preferences.sql       # Pipeline column visibility preferences
+    ├── 20260107_add_pipeline_preferences.sql       # Pipeline column visibility preferences
+    └── 20260109_add_cancel_at_period_end.sql       # Subscription cancellation tracking
 ```
 
 ---
@@ -293,22 +292,15 @@ Components
 | recording_url, transcription, ai_summary | text | |
 | started_at, ended_at | timestamp | |
 
-**scrape_jobs** — Lead finder jobs
-| Column | Type | Notes |
-|--------|------|-------|
-| id, user_id | uuid | Standard |
-| niche, location | text | Search params |
-| lead_count | int | Requested count |
-| status | text | `pending` → `processing` → `completed`/`failed`/`cancelled` |
-| progress_current, progress_total | int | Real-time progress |
-| error_message | text | |
-
 **profiles** — User settings (extends auth.users)
 | Column | Type | Notes |
 |--------|------|-------|
 | id | uuid | PK, FK → auth.users |
 | subscription_status | text | `free` or `pro` |
 | subscription_plan, stripe_customer_id | text | Billing |
+| cancel_at_period_end | bool | True if cancellation scheduled |
+| current_period_end | timestamp | When billing period ends |
+| trial_ends_at | timestamp | When trial period ends (null if never trialed) |
 | twilio_account_sid, twilio_auth_token, twilio_twiml_app_sid, twilio_phone_number | text | Calling |
 | gmail_access_token, gmail_refresh_token, gmail_token_expires_at, gmail_email | text | Gmail OAuth |
 | resend_api_key, resend_from_address | text | Resend |
@@ -373,8 +365,7 @@ auth.users
     │       └── activities (1:many)
     │       └── call_records (1:many)
     ├── strategies (1:many)
-    ├── outreach_goals (1:1)
-    └── scrape_jobs (1:many)
+    └── outreach_goals (1:1)
 ```
 
 ### Row Level Security
@@ -424,7 +415,6 @@ When assigned:
 |-------|------|-----|
 | Lead storage | 50 | Unlimited |
 | Strategies | 1 | Unlimited |
-| Scrapes/month | 100 | Unlimited |
 | Reporting | No | Yes |
 | CSV Export | No | Yes |
 
@@ -476,13 +466,6 @@ Managed via `useSubscription()` hook with realtime updates from Stripe webhooks.
 | `getResendCredentials()` / `updateResendCredentials()` / `clearResendCredentials()` | Resend API |
 | `getEmailProvider()` / `setEmailProvider()` | Provider preference |
 | `hasEmailConfigured()` | Setup check |
-
-### Scrape Jobs
-| Function | Purpose |
-|----------|---------|
-| `getScrapeJobs()` | Job history |
-| `getScrapeJobById()` | With progress |
-| `createScrapeJob()` / `cancelScrapeJob()` | Job management |
 
 ### Duplicate Detection (SQL RPCs)
 | Function | Purpose |
@@ -536,6 +519,11 @@ Managed via `useSubscription()` hook with realtime updates from Stripe webhooks.
 | `setCustomFieldValue(userId, leadId, fieldId, value)` | Set/update a value |
 | `customFieldHasValues(userId, fieldId)` | Check if field has data |
 
+### Subscription
+| Function | Purpose |
+|----------|---------|
+| `cancelSubscription()` | Cancel subscription at period end (calls edge function) |
+
 ---
 
 ## Performance Optimizations
@@ -588,7 +576,6 @@ queryKeys.gmailCredentials(userId)
 queryKeys.resendCredentials(userId)
 queryKeys.emailProvider(userId)
 queryKeys.subscription(userId)
-queryKeys.scrapeUsage(userId)
 ```
 
 ---
@@ -624,7 +611,6 @@ OAuth tokens and API keys are encrypted server-side:
 ### Webhook Validation
 External webhooks are validated:
 - Twilio webhooks verified with HMAC-SHA1 signature (`recording-ready`)
-- Scrape callbacks verified with shared secret (`scrape-callback`)
 - Stripe webhooks verified with HMAC-SHA256 signature (`stripe-webhook`)
 
 ### Input Validation

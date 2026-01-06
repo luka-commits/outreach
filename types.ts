@@ -143,29 +143,6 @@ export interface OutreachGoals {
   walkIn: number;
 }
 
-export type ScrapeJobStage = 'queued' | 'scraping' | 'enriching' | 'finalizing' | 'completed' | 'failed';
-
-export interface ScrapeJob {
-  id: string;
-  niche: string;
-  location: string;
-  leadCount: number;
-  expandedRadius: boolean;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  createdAt: string;
-  // Result tracking fields
-  leadsFound?: number;
-  leadsImported?: number;
-  leadsSkipped?: number;
-  errorMessage?: string;
-  startedAt?: string;
-  completedAt?: string;
-  // Progress tracking fields
-  stage?: ScrapeJobStage;
-  progress?: number;
-  stageMessage?: string;
-}
-
 // Cold Calling Types
 export type CallOutcome = 'connected' | 'voicemail' | 'no_answer' | 'busy' | 'wrong_number';
 export type CallStatus = 'initiated' | 'ringing' | 'in-progress' | 'completed' | 'failed' | 'reconnecting';

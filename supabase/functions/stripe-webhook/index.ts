@@ -207,11 +207,12 @@ serve(async (req) => {
       }
 
       case 'customer.subscription.updated': {
-        // Subscription changed (renewal, plan change, trial conversion, etc.)
+        // Subscription changed (renewal, plan change, trial conversion, cancellation scheduled, etc.)
         const subscription = event.data.object;
         const customerId = subscription.customer;
         const status = subscription.status; // active, past_due, canceled, trialing, etc.
         const periodEnd = new Date(subscription.current_period_end * 1000).toISOString();
+        const cancelAtPeriodEnd = subscription.cancel_at_period_end || false;
 
         // Map Stripe status to our status
         let subscriptionStatus = 'free';
@@ -239,6 +240,7 @@ serve(async (req) => {
         const updateData: Record<string, unknown> = {
           subscription_status: subscriptionStatus,
           current_period_end: periodEnd,
+          cancel_at_period_end: cancelAtPeriodEnd,
         };
 
         // If transitioning to trial and we don't have trial_ends_at set, capture it
@@ -255,7 +257,7 @@ serve(async (req) => {
         if (error) {
           console.error('Failed to update subscription:', error);
         } else {
-          console.log(`Updated subscription for user ${profile.id} to ${subscriptionStatus}`);
+          console.log(`Updated subscription for user ${profile.id} to ${subscriptionStatus}${cancelAtPeriodEnd ? ' (cancelling at period end)' : ''}`);
         }
         break;
       }
@@ -283,6 +285,7 @@ serve(async (req) => {
           .update({
             subscription_status: 'canceled',
             subscription_plan: 'basic',
+            cancel_at_period_end: false, // Reset since cancellation is now complete
           })
           .eq('id', profile.id);
 

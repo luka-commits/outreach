@@ -1,8 +1,8 @@
 import React from 'react';
-import { User, Phone, Mail, Search, CheckCircle2, Sliders } from 'lucide-react';
+import { User, Phone, Mail, CheckCircle2, Sliders } from 'lucide-react';
 import { radius, transitions } from '../../lib/designTokens';
 
-export type SettingsTab = 'account' | 'calling' | 'email' | 'lead-finder' | 'custom-fields';
+export type SettingsTab = 'account' | 'calling' | 'email' | 'custom-fields';
 
 interface TabConfig {
   id: SettingsTab;
@@ -14,7 +14,6 @@ const tabs: TabConfig[] = [
   { id: 'account', label: 'Account', icon: <User size={18} /> },
   { id: 'calling', label: 'Calling', icon: <Phone size={18} /> },
   { id: 'email', label: 'Email', icon: <Mail size={18} /> },
-  { id: 'lead-finder', label: 'Lead Finder', icon: <Search size={18} /> },
   { id: 'custom-fields', label: 'Custom Fields', icon: <Sliders size={18} /> },
 ];
 

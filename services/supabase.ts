@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, ScrapeJob, CallRecord, TwilioCredentials, CallMetrics, GmailCredentials, ResendCredentials, EmailProvider, LeadTag, LeadNote, StrategyPerformance, SavedFilter, DuplicateGroup, MergeConfig, ChannelPerformance, WeeklyTrend, ReportingDashboard, UserPublicProfile, UserActivityMetrics, LeaderboardEntry, UserRankInfo, LeaderboardPeriod, CustomFieldDefinition, CustomFieldValue, CustomFieldType, CustomFieldFormValue, SelectOption, TaskAction, ReplyFollowUp, LostReason, PipelinePreferences } from '../types';
+import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, CallRecord, TwilioCredentials, CallMetrics, GmailCredentials, ResendCredentials, EmailProvider, LeadTag, LeadNote, StrategyPerformance, SavedFilter, DuplicateGroup, MergeConfig, ChannelPerformance, WeeklyTrend, ReportingDashboard, UserPublicProfile, UserActivityMetrics, LeaderboardEntry, UserRankInfo, LeaderboardPeriod, CustomFieldDefinition, CustomFieldValue, CustomFieldType, CustomFieldFormValue, SelectOption, TaskAction, ReplyFollowUp, LostReason, PipelinePreferences } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -139,28 +139,6 @@ export interface DbGoals {
   email: number;
   call: number;
   walk_in: number;
-}
-
-interface DbScrapeJob {
-  id: string;
-  user_id: string;
-  niche: string;
-  location: string;
-  lead_count: number;
-  expanded_radius: boolean;
-  status: string;
-  created_at: string;
-  // Result tracking fields
-  leads_found: number | null;
-  leads_imported: number | null;
-  leads_skipped: number | null;
-  error_message: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  // Progress tracking fields
-  stage: string | null;
-  progress: number | null;
-  stage_message: string | null;
 }
 
 // Transform functions
@@ -405,25 +383,6 @@ export async function clearReplyFollowUp(
 
   if (error) throw error;
 }
-
-const dbScrapeJobToScrapeJob = (db: DbScrapeJob): ScrapeJob => ({
-  id: db.id,
-  niche: db.niche,
-  location: db.location,
-  leadCount: db.lead_count,
-  expandedRadius: db.expanded_radius,
-  status: db.status as ScrapeJob['status'],
-  createdAt: db.created_at,
-  leadsFound: db.leads_found ?? undefined,
-  leadsImported: db.leads_imported ?? undefined,
-  leadsSkipped: db.leads_skipped ?? undefined,
-  errorMessage: db.error_message ?? undefined,
-  startedAt: db.started_at ?? undefined,
-  completedAt: db.completed_at ?? undefined,
-  stage: (db.stage as ScrapeJob['stage']) ?? undefined,
-  progress: db.progress ?? undefined,
-  stageMessage: db.stage_message ?? undefined,
-});
 
 // Tasks / Dashboard API
 export async function getDueTasks(userId: string): Promise<Lead[]> {
@@ -1084,103 +1043,6 @@ export async function updateGoals(goals: OutreachGoals, userId: string): Promise
   if (error) throw error;
 }
 
-// Scrape Jobs API
-export async function getScrapeJobs(userId: string): Promise<ScrapeJob[]> {
-  const { data, error } = await supabase
-    .from('scrape_jobs')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(20);
-
-  if (error) throw error;
-
-  return (data || []).map(dbScrapeJobToScrapeJob);
-}
-
-export async function getScrapeJob(jobId: string, userId: string): Promise<ScrapeJob | null> {
-  const { data, error } = await supabase
-    .from('scrape_jobs')
-    .select('*')
-    .eq('id', jobId)
-    .eq('user_id', userId)
-    .single();
-
-  if (error && error.code !== 'PGRST116') throw error;
-  if (!data) return null;
-
-  return dbScrapeJobToScrapeJob(data);
-}
-
-export async function createScrapeJob(job: Omit<ScrapeJob, 'id' | 'createdAt' | 'status'>, userId: string): Promise<ScrapeJob> {
-  const { data, error } = await supabase
-    .from('scrape_jobs')
-    .insert({
-      user_id: userId,
-      niche: job.niche,
-      location: job.location,
-      lead_count: job.leadCount,
-      expanded_radius: job.expandedRadius,
-      status: 'pending'
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-
-  return dbScrapeJobToScrapeJob(data);
-}
-
-export async function updateScrapeJobStatus(
-  jobId: string,
-  userId: string,
-  status: ScrapeJob['status']
-): Promise<void> {
-  const { error } = await supabase
-    .from('scrape_jobs')
-    .update({ status })
-    .eq('id', jobId)
-    .eq('user_id', userId);
-
-  if (error) throw error;
-}
-
-export async function cancelScrapeJob(jobId: string, userId: string): Promise<void> {
-  const { error } = await supabase
-    .from('scrape_jobs')
-    .update({
-      status: 'failed',
-      error_message: 'Manually stopped by user',
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', jobId)
-    .eq('user_id', userId);
-
-  if (error) throw error;
-}
-
-/**
- * Get the total number of leads scraped this month for a user.
- * Used for enforcing the free tier scrape limit (100 leads/month).
- */
-export async function getScrapeUsageThisMonth(userId: string): Promise<number> {
-  // Get the first day of the current month
-  const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-  const { data, error } = await supabase
-    .from('scrape_jobs')
-    .select('leads_imported')
-    .eq('user_id', userId)
-    .eq('status', 'completed')
-    .gte('created_at', firstDayOfMonth);
-
-  if (error) throw error;
-
-  // Sum up all leads_imported values
-  return (data || []).reduce((sum, job) => sum + (job.leads_imported || 0), 0);
-}
-
 /**
  * Get the URL scrape usage this month for a user.
  * Used for the Quick Import feature limit (20/month for free users).
@@ -1205,86 +1067,6 @@ export async function getUrlScrapeUsageThisMonth(userId: string): Promise<number
   }
 
   return data.url_scrapes_this_month || 0;
-}
-
-/**
- * Check for stale jobs (processing for more than 15 minutes) and mark them as timed out.
- * Returns array of job IDs that were marked as timed out.
- */
-export async function checkAndTimeoutStaleJobs(userId: string): Promise<string[]> {
-  const TIMEOUT_MINUTES = 15;
-  const timeoutThreshold = new Date(Date.now() - TIMEOUT_MINUTES * 60 * 1000).toISOString();
-
-  // Find jobs that are still 'processing' but started more than 15 minutes ago
-  const { data: staleJobs, error: fetchError } = await supabase
-    .from('scrape_jobs')
-    .select('id, started_at')
-    .eq('user_id', userId)
-    .eq('status', 'processing')
-    .lt('started_at', timeoutThreshold);
-
-  if (fetchError || !staleJobs || staleJobs.length === 0) {
-    return [];
-  }
-
-  const timedOutIds: string[] = [];
-
-  // Mark each stale job as failed due to timeout
-  for (const job of staleJobs) {
-    const { error: updateError } = await supabase
-      .from('scrape_jobs')
-      .update({
-        status: 'failed',
-        error_message: 'Timed out: No response from scraper after 15 minutes',
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', job.id)
-      .eq('user_id', userId);
-
-    if (!updateError) {
-      timedOutIds.push(job.id);
-      console.warn(`Job ${job.id} marked as timed out`);
-    }
-  }
-
-  return timedOutIds;
-}
-
-/**
- * Subscribe to realtime updates for scrape jobs.
- * Returns an unsubscribe function.
- */
-export function subscribeScrapeJobUpdates(
-  userId: string,
-  onUpdate: (job: ScrapeJob) => void
-): () => void {
-  console.warn('[Realtime] Subscribing to scrape_jobs updates for user:', userId);
-
-  const channel = supabase
-    .channel(`scrape_jobs:${userId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'scrape_jobs',
-        filter: `user_id=eq.${userId}`,
-      },
-      (payload) => {
-        console.warn('[Realtime] Received update:', payload.new);
-        const db = payload.new as DbScrapeJob;
-        onUpdate(dbScrapeJobToScrapeJob(db));
-      }
-    )
-    .subscribe((status) => {
-      console.warn('[Realtime] Subscription status:', status);
-    });
-
-  // Return unsubscribe function
-  return () => {
-    console.warn('[Realtime] Unsubscribing from scrape_jobs');
-    supabase.removeChannel(channel);
-  };
 }
 
 // ============================================
@@ -1687,66 +1469,6 @@ export async function getLead(id: string, userId: string): Promise<Lead> {
 
   if (error) throw error;
   return dbLeadToLead(data);
-}
-
-// ============================================
-// USER API KEYS
-// For scraping workflow integration
-// ============================================
-
-export interface UserApiKeys {
-  apifyToken: string | null;
-  anthropicKey: string | null;
-}
-
-/**
- * Get user's API keys for scraping workflow.
- */
-export async function getUserApiKeys(userId: string): Promise<UserApiKeys> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('apify_api_token, anthropic_api_key')
-    .eq('id', userId)
-    .single();
-
-  if (error && error.code !== 'PGRST116') throw error;
-
-  return {
-    apifyToken: data?.apify_api_token || null,
-    anthropicKey: data?.anthropic_api_key || null,
-  };
-}
-
-/**
- * Update user's API keys for scraping workflow.
- */
-export async function updateUserApiKeys(
-  userId: string,
-  keys: Partial<UserApiKeys>
-): Promise<void> {
-  const updateData: Record<string, string | null> = {};
-
-  if (keys.apifyToken !== undefined) {
-    updateData.apify_api_token = keys.apifyToken;
-  }
-  if (keys.anthropicKey !== undefined) {
-    updateData.anthropic_api_key = keys.anthropicKey;
-  }
-
-  const { error } = await supabase
-    .from('profiles')
-    .update(updateData)
-    .eq('id', userId);
-
-  if (error) throw error;
-}
-
-/**
- * Check if user has API keys configured for scraping.
- */
-export async function hasApiKeysConfigured(userId: string): Promise<boolean> {
-  const keys = await getUserApiKeys(userId);
-  return !!(keys.apifyToken && keys.anthropicKey);
 }
 
 // ============================================
@@ -4063,5 +3785,31 @@ export async function upsertPipelinePreferences(
   if (error) throw error;
 
   return dbPipelinePrefsToPrefs(data);
+}
+
+/**
+ * Cancels the user's subscription at the end of the current billing period.
+ * User retains Pro access until periodEnd.
+ */
+export async function cancelSubscription(): Promise<{ cancelAt: string }> {
+  const session = await getSession();
+  if (!session?.access_token) {
+    throw new Error('Not authenticated');
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/cancel-subscription`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to cancel subscription');
+  }
+
+  return response.json();
 }
 

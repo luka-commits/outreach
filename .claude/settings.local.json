@@ -30,7 +30,8 @@
       "Bash(npm run lint:*)",
       "Bash(wc:*)",
       "Bash(lsof:*)",
-      "Bash(timeout 10 npm run dev:*)"
+      "Bash(timeout 10 npm run dev:*)",
+      "Bash(xargs kill -9)"
     ]
   }
 }

@@ -3,11 +3,12 @@ import { LogOut, ExternalLink, Camera, Check, X, Pencil, AlertTriangle, Loader2 
 import { Button } from '../ui/Button';
 import { radius, shadows } from '../../lib/designTokens';
 import { useAuth } from '../../hooks/useAuth';
-import { useSubscription } from '../../hooks/useSubscription';
+import { useSubscription, useCancelSubscription } from '../../hooks/useSubscription';
 import { useUserPublicProfileQuery, useUserPublicProfileMutations, useResetUserActivityMetrics } from '../../hooks/queries/useNetworkingQuery';
 import { supabase } from '../../services/supabase';
 import { useToast } from '../Toast';
 import ConfirmModal from '../ConfirmModal';
+import CancelSubscriptionModal from './CancelSubscriptionModal';
 
 interface AccountTabProps {
   onOpenPricing: () => void;
@@ -17,7 +18,8 @@ const STRIPE_PORTAL_LINK = 'https://billing.stripe.com/p/login/cNi8wP59W3790FT1i
 
 const AccountTab: React.FC<AccountTabProps> = ({ onOpenPricing }) => {
   const { user, signOut } = useAuth();
-  const { subscription, isPro, isTrial, trialDaysLeft, trialEndsAt } = useSubscription();
+  const { subscription, isPro, isTrial, isCancelling, trialDaysLeft, trialEndsAt } = useSubscription();
+  const cancelSubscription = useCancelSubscription();
   const { showToast } = useToast();
 
   // Profile data
@@ -42,7 +44,21 @@ const AccountTab: React.FC<AccountTabProps> = ({ onOpenPricing }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Determine if user can cancel (active Pro, not trial, not already cancelling)
+  const canCancel = isPro && !isTrial && subscription?.status === 'active' && !isCancelling;
+
+  const handleCancelSubscription = async () => {
+    try {
+      await cancelSubscription.mutateAsync();
+      showToast('Subscription cancelled. You\'ll keep Pro access until your billing period ends.', 'success');
+      setShowCancelModal(false);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to cancel subscription', 'error');
+    }
+  };
 
   // Sync form state with profile data
   useEffect(() => {
@@ -281,7 +297,9 @@ const AccountTab: React.FC<AccountTabProps> = ({ onOpenPricing }) => {
               </span>
             </div>
             <p className="text-slate-500 text-sm">
-              {isTrial
+              {isCancelling
+                ? `Cancelling on ${subscription?.periodEnd ? new Date(subscription.periodEnd).toLocaleDateString() : 'end of billing period'}`
+                : isTrial
                 ? `Trial ends ${trialEndsAt?.toLocaleDateString()} (${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left)`
                 : isPro
                 ? 'Full access to all features'
@@ -289,21 +307,31 @@ const AccountTab: React.FC<AccountTabProps> = ({ onOpenPricing }) => {
             </p>
           </div>
 
-          {isPro ? (
-            <Button
-              variant="outline"
-              size="md"
-              icon={<ExternalLink size={16} />}
-              iconPosition="right"
-              onClick={handleManageBilling}
-            >
-              {isTrial ? 'Upgrade Now' : 'Manage Billing'}
-            </Button>
-          ) : (
-            <Button variant="primary" size="md" onClick={onOpenPricing}>
-              Upgrade Now
-            </Button>
-          )}
+          <div className="flex flex-col items-end gap-2">
+            {isPro ? (
+              <Button
+                variant="outline"
+                size="md"
+                icon={<ExternalLink size={16} />}
+                iconPosition="right"
+                onClick={handleManageBilling}
+              >
+                {isTrial ? 'Upgrade Now' : 'Manage Billing'}
+              </Button>
+            ) : (
+              <Button variant="primary" size="md" onClick={onOpenPricing}>
+                Upgrade Now
+              </Button>
+            )}
+            {canCancel && (
+              <button
+                onClick={() => setShowCancelModal(true)}
+                className="text-sm text-slate-400 hover:text-red-500 transition-colors"
+              >
+                Cancel Subscription
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -361,6 +389,15 @@ const AccountTab: React.FC<AccountTabProps> = ({ onOpenPricing }) => {
         confirmLabel="Reset Everything"
         cancelLabel="Cancel"
         variant="danger"
+      />
+
+      {/* Cancel Subscription Modal */}
+      <CancelSubscriptionModal
+        isOpen={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        onConfirm={handleCancelSubscription}
+        isLoading={cancelSubscription.isPending}
+        periodEnd={subscription?.periodEnd ? new Date(subscription.periodEnd) : null}
       />
     </div>
   );
