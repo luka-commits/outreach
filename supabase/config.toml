@@ -22,3 +22,11 @@ verify_jwt = false
 [functions.send-email]
 # JWT verification handled manually in function code (getUser validation)
 verify_jwt = false
+
+[functions.find-leads]
+# JWT verification handled manually in function code (getUser validation)
+verify_jwt = false
+
+[functions.import-leads]
+# JWT verification handled manually in function code (getUser validation)
+verify_jwt = false

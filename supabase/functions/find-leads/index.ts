@@ -1,12 +1,13 @@
 /**
  * find-leads Edge Function
  *
- * Searches for businesses using Modal scraper and imports them as leads.
+ * Searches for businesses using Modal scraper and returns them for preview.
+ * Does NOT auto-import - user reviews leads first, then imports via import-leads endpoint.
  * Calls the Modal webhook: https://luka-50609--lead-scraper-scrape-leads.modal.run
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1"
 import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse, createSuccessResponse } from "../_shared/cors.ts"
 
 const MODAL_WEBHOOK_URL = 'https://luka-50609--lead-scraper-scrape-leads.modal.run';
@@ -85,11 +86,11 @@ serve(async (req) => {
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     // 3. Get the authenticated user
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser(token);
+    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
 
     if (authError || !user) {
-      return createErrorResponse(req, 'Unauthorized', 401);
+      console.error('[find-leads] Auth error:', authError?.message);
+      return createErrorResponse(req, authError?.message || 'Unauthorized', 401);
     }
 
     // 4. Check subscription status for limits
@@ -171,67 +172,38 @@ serve(async (req) => {
       (existingLeads || []).map(l => normalizeCompanyName(l.company_name))
     );
 
-    // 8. Filter out duplicates and prepare leads for insert
-    const leadsToInsert = modalData.leads
-      .filter(lead => {
-        if (!lead.company_name) return false;
-        const normalized = normalizeCompanyName(lead.company_name);
-        if (existingNames.has(normalized)) {
-          return false;
-        }
-        // Add to set to prevent duplicates within the batch
-        existingNames.add(normalized);
-        return true;
-      })
-      .map(lead => ({
-        user_id: user.id,
-        company_name: lead.company_name,
-        website_url: lead.website || null,
-        phone: lead.phone || null,
-        email: lead.email || null,
-        address: lead.address || null,
-        google_rating: lead.rating || null,
-        google_review_count: lead.review_count || null,
-        category: lead.category || null,
-        niche: lead.category || keyword, // Use category or fallback to search keyword
-        location: location || null,
-        facebook_url: lead.facebook_url || null,
-        instagram_url: lead.instagram_url || null,
-        linkedin_url: lead.linkedin_url || null,
-        status: 'not_contacted',
-        created_at: new Date().toISOString(),
-      }));
+    // 8. Separate leads into new and duplicates
+    const newLeads: typeof modalData.leads = [];
+    const duplicateLeads: typeof modalData.leads = [];
+    const seenInBatch = new Set<string>();
 
-    // 9. Insert leads
-    let insertedCount = 0;
-    if (leadsToInsert.length > 0) {
-      const { error: insertError, data: insertedLeads } = await supabaseAdmin
-        .from('leads')
-        .insert(leadsToInsert)
-        .select('id');
+    for (const lead of modalData.leads) {
+      if (!lead.company_name) continue;
+      const normalized = normalizeCompanyName(lead.company_name);
 
-      if (insertError) {
-        console.error('Error inserting leads:', insertError);
-        return createErrorResponse(req, 'Failed to import leads.', 500);
+      if (existingNames.has(normalized) || seenInBatch.has(normalized)) {
+        duplicateLeads.push(lead);
+      } else {
+        seenInBatch.add(normalized);
+        newLeads.push(lead);
       }
-
-      insertedCount = insertedLeads?.length || 0;
     }
 
-    const skippedCount = modalData.leads.length - insertedCount;
+    console.log(`[find-leads] Found ${newLeads.length} new leads, ${duplicateLeads.length} duplicates`);
 
-    console.log(`[find-leads] Imported ${insertedCount} leads, skipped ${skippedCount} duplicates`);
-
-    // 10. Return success response
+    // 9. Return leads for preview (no auto-import)
     return createSuccessResponse(req, {
       success: true,
-      leads: leadsToInsert.slice(0, insertedCount),
+      leads: newLeads,
+      duplicates: duplicateLeads,
       total_found: modalData.total_found,
-      imported: insertedCount,
-      skipped: skippedCount,
-      message: insertedCount > 0
-        ? `Successfully imported ${insertedCount} leads`
-        : 'No new leads found (all were duplicates)',
+      new_count: newLeads.length,
+      duplicate_count: duplicateLeads.length,
+      search_params: {
+        keyword,
+        location: location || null,
+        country,
+      },
     });
 
   } catch (error) {
