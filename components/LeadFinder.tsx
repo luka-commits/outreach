@@ -187,7 +187,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
   };
 
   const handleImport = async () => {
-    if (!user || previewLeads.length === 0) return;
+    if (!user || (previewLeads || []).length === 0) return;
 
     setIsImporting(true);
     setError(null);
@@ -471,11 +471,11 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
             <p className="text-xs text-slate-500">Listings Scraped</p>
           </div>
           <div className={`bg-white p-4 ${radius.md} ${shadows.sm} border border-emerald-200 bg-emerald-50`}>
-            <p className="text-2xl font-semibold text-emerald-600">{previewLeads.length}</p>
+            <p className="text-2xl font-semibold text-emerald-600">{(previewLeads || []).length}</p>
             <p className="text-xs text-slate-500">New Leads</p>
           </div>
           <div className={`bg-white p-4 ${radius.md} ${shadows.sm} border border-slate-200`}>
-            <p className="text-2xl font-semibold text-slate-400">{duplicateLeads.length}</p>
+            <p className="text-2xl font-semibold text-slate-400">{(duplicateLeads || []).length}</p>
             <p className="text-xs text-slate-500">Duplicates</p>
           </div>
           <div className={`bg-white p-4 ${radius.md} ${shadows.sm} border border-blue-200 bg-blue-50`}>
@@ -512,13 +512,13 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
         )}
 
         {/* Leads List */}
-        {previewLeads.length > 0 ? (
+        {(previewLeads || []).length > 0 ? (
           <div className={`bg-white ${radius.md} ${shadows.sm} border border-slate-200 mb-6 overflow-hidden`}>
             <div className="max-h-96 overflow-y-auto">
-              {previewLeads.map((lead, index) => (
+              {(previewLeads || []).map((lead, index) => (
                 <div
                   key={index}
-                  className={`p-4 ${index !== previewLeads.length - 1 ? 'border-b border-slate-100' : ''} hover:bg-slate-50 ${transitions.fast}`}
+                  className={`p-4 ${index !== (previewLeads || []).length - 1 ? 'border-b border-slate-100' : ''} hover:bg-slate-50 ${transitions.fast}`}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -609,7 +609,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
           </button>
           <button
             onClick={handleImport}
-            disabled={isImporting || previewLeads.length === 0}
+            disabled={isImporting || (previewLeads || []).length === 0}
             className={`flex-1 py-3 px-4 bg-blue-600 text-white font-medium ${radius.md} hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed ${transitions.fast} flex items-center justify-center gap-2`}
           >
             {isImporting ? (
@@ -620,7 +620,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
             ) : (
               <>
                 <Download size={18} />
-                Import {previewLeads.length} Leads
+                Import {(previewLeads || []).length} Leads
               </>
             )}
           </button>
