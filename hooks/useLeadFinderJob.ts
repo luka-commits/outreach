@@ -60,12 +60,11 @@ export function useLeadFinderJob(jobId: string | null) {
           table: 'scrape_jobs',
           filter: `id=eq.${jobId}`,
         },
-        (payload) => {
-          // Update the cache directly with new data
-          queryClient.setQueryData(
-            queryKeys.leadFinderJob(userId, jobId),
-            payload.new as LeadFinderJob
-          );
+        () => {
+          // Force refetch to get latest data - invalidateQueries is more reliable than setQueryData
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.leadFinderJob(userId, jobId),
+          });
         }
       )
       .subscribe();
@@ -74,6 +73,9 @@ export function useLeadFinderJob(jobId: string | null) {
       supabase.removeChannel(channel);
     };
   }, [userId, jobId, queryClient]);
+
+  // Timeout for stuck jobs (10 minutes)
+  const JOB_TIMEOUT_MS = 10 * 60 * 1000;
 
   const query = useQuery({
     queryKey: queryKeys.leadFinderJob(userId, jobId!),
@@ -93,6 +95,19 @@ export function useLeadFinderJob(jobId: string | null) {
         throw error;
       }
 
+      // Auto-fail jobs stuck in processing for too long
+      if (data.status === 'processing' || data.status === 'pending') {
+        const createdAt = new Date(data.created_at);
+        const elapsed = Date.now() - createdAt.getTime();
+        if (elapsed > JOB_TIMEOUT_MS) {
+          return {
+            ...data,
+            status: 'failed',
+            error_message: 'Search timed out. Please try again.',
+          } as LeadFinderJob;
+        }
+      }
+
       return data as LeadFinderJob;
     },
     enabled: !!userId && !!jobId,
@@ -100,7 +115,7 @@ export function useLeadFinderJob(jobId: string | null) {
     refetchInterval: (query) => {
       const job = query.state.data;
       if (job && (job.status === 'pending' || job.status === 'processing')) {
-        return 5000; // Poll every 5 seconds while processing
+        return 3000; // Poll every 3 seconds while processing
       }
       return false; // Stop polling when complete
     },

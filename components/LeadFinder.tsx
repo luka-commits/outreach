@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MapPin, Globe, Users, Loader2, AlertCircle, CheckCircle2, ExternalLink, Phone, Mail, Facebook, Instagram, Linkedin, ArrowLeft, Download, XCircle } from 'lucide-react';
+import { Search, MapPin, Globe, Users, Loader2, AlertCircle, CheckCircle2, ExternalLink, Phone, Mail, Facebook, Instagram, Linkedin, ArrowLeft, Download, XCircle, RefreshCw } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscription } from '../hooks/useSubscription';
@@ -78,7 +78,23 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
 
   // Job tracking
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [searchStartTime, setSearchStartTime] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const { job, isCompleted, isFailed, leads, duplicates } = useLeadFinderJob(currentJobId);
+
+  // Update elapsed time while processing
+  useEffect(() => {
+    if (viewState !== 'processing' || !searchStartTime) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - searchStartTime) / 1000));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [viewState, searchStartTime]);
 
   // Results state (for preview)
   const [previewLeads, setPreviewLeads] = useState<LeadFinderLead[]>([]);
@@ -170,6 +186,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
 
       // Store job ID and switch to processing view
       setCurrentJobId(data.job_id);
+      setSearchStartTime(Date.now());
       setSearchParams({
         keyword: keyword.trim(),
         location: location.trim() || null,
@@ -262,6 +279,23 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
   const leadsWithEmail = (previewLeads || []).filter(l => l.email).length;
   const leadsWithPhone = (previewLeads || []).filter(l => l.phone).length;
 
+  // Format elapsed time
+  const formatElapsed = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins === 0) return `${secs}s`;
+    return `${mins}m ${secs}s`;
+  };
+
+  // Manual refresh function
+  const handleCheckStatus = () => {
+    if (currentJobId && user?.id) {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.leadFinderJob(user.id, currentJobId),
+      });
+    }
+  };
+
   // Render processing view
   if (viewState === 'processing') {
     return (
@@ -286,19 +320,31 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
             <p className="text-sm text-slate-500">
               {job?.stage_message || 'Starting search...'}
             </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Elapsed: {formatElapsed(elapsedSeconds)}
+            </p>
           </div>
 
           <p className="text-sm text-slate-500 mb-6">
             This may take a few minutes. We're scraping Google Maps and extracting contact details for each business.
           </p>
 
-          <button
-            onClick={handleCancelSearch}
-            className={`py-2 px-4 text-slate-600 hover:text-slate-800 hover:bg-slate-100 ${radius.md} ${transitions.fast} inline-flex items-center gap-2`}
-          >
-            <XCircle size={16} />
-            Cancel
-          </button>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={handleCheckStatus}
+              className={`py-2 px-4 text-blue-600 hover:text-blue-700 hover:bg-blue-50 ${radius.md} ${transitions.fast} inline-flex items-center gap-2`}
+            >
+              <RefreshCw size={16} />
+              Check Status
+            </button>
+            <button
+              onClick={handleCancelSearch}
+              className={`py-2 px-4 text-slate-600 hover:text-slate-800 hover:bg-slate-100 ${radius.md} ${transitions.fast} inline-flex items-center gap-2`}
+            >
+              <XCircle size={16} />
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     );

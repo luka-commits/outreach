@@ -49,11 +49,15 @@ serve(async (req) => {
     });
   }
 
+  // Create Supabase admin client early so we can mark jobs as failed
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
   try {
     // 1. Parse request body
-    const payload: CallbackPayload = await req.json();
-
-    const { job_id, secret, success, leads, total_found, error: modalError } = payload;
+    const payload = await req.json();
+    const { job_id, secret, success, leads, total_found, error: modalError } = payload as CallbackPayload;
 
     console.log(`[lead-finder-callback] Received callback for job ${job_id}, success=${success}, leads=${leads?.length || 0}`);
 
@@ -70,19 +74,24 @@ serve(async (req) => {
     const expectedSecret = Deno.env.get('LEAD_FINDER_CALLBACK_SECRET') ?? '';
     if (!expectedSecret || secret !== expectedSecret) {
       console.error('[lead-finder-callback] Invalid callback secret');
-      // Return 200 to prevent retries, but log the error
+
+      // Mark job as failed so user isn't stuck forever
+      await supabaseAdmin
+        .from('scrape_jobs')
+        .update({
+          status: 'failed',
+          stage: 'failed',
+          error_message: 'Authentication error. Please try again or contact support.',
+        })
+        .eq('id', job_id);
+
       return new Response(JSON.stringify({ received: true }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // 4. Create Supabase admin client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-    // 5. Fetch the job to get user_id
+    // 4. Fetch the job to get user_id
     const { data: job, error: jobFetchError } = await supabaseAdmin
       .from('scrape_jobs')
       .select('id, user_id, status')
@@ -98,7 +107,7 @@ serve(async (req) => {
       });
     }
 
-    // 6. Handle error case
+    // 5. Handle error case
     if (!success) {
       console.error(`[lead-finder-callback] Job ${job_id} failed: ${modalError}`);
 
@@ -117,7 +126,7 @@ serve(async (req) => {
       });
     }
 
-    // 7. Get existing leads for duplicate detection
+    // 6. Get existing leads for duplicate detection
     const { data: existingLeads, error: leadsError } = await supabaseAdmin
       .from('leads')
       .select('company_name')
@@ -132,7 +141,7 @@ serve(async (req) => {
       (existingLeads || []).map(l => normalizeCompanyName(l.company_name))
     );
 
-    // 8. Separate leads into new and duplicates
+    // 7. Separate leads into new and duplicates
     const newLeads: ModalLead[] = [];
     const duplicateLeads: ModalLead[] = [];
     const seenInBatch = new Set<string>();
@@ -151,7 +160,7 @@ serve(async (req) => {
 
     console.log(`[lead-finder-callback] Job ${job_id}: ${newLeads.length} new leads, ${duplicateLeads.length} duplicates`);
 
-    // 9. Update job with results
+    // 8. Update job with results
     const { error: updateError } = await supabaseAdmin
       .from('scrape_jobs')
       .update({
