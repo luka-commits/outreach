@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { Search, MapPin, Globe, Users, Loader2, AlertCircle, CheckCircle2, ExternalLink, Phone, Mail, Facebook, Instagram, Linkedin, ArrowLeft, Download } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, MapPin, Globe, Users, Loader2, AlertCircle, CheckCircle2, ExternalLink, Phone, Mail, Facebook, Instagram, Linkedin, ArrowLeft, Download, XCircle } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscription } from '../hooks/useSubscription';
+import { useLeadFinderJob, LeadFinderLead } from '../hooks/useLeadFinderJob';
 import { queryClient, queryKeys } from '../lib/queryClient';
 import { useToast } from './Toast';
 import { radius, shadows, transitions } from '../lib/designTokens';
@@ -11,34 +12,17 @@ interface LeadFinderProps {
   onNavigateToSettings?: () => void;
 }
 
-interface ScrapedLead {
-  company_name: string;
-  website?: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-  rating?: number;
-  review_count?: number;
-  category?: string;
-  facebook_url?: string;
-  instagram_url?: string;
-  linkedin_url?: string;
-}
-
 interface SearchParams {
   keyword: string;
   location: string | null;
   country: string;
 }
 
-interface FindLeadsResponse {
+interface StartJobResponse {
   success: boolean;
-  leads: ScrapedLead[];
-  duplicates: ScrapedLead[];
-  total_found: number;
-  new_count: number;
-  duplicate_count: number;
-  search_params: SearchParams;
+  job_id: string;
+  status: string;
+  message: string;
 }
 
 interface ImportResponse {
@@ -73,7 +57,7 @@ const COUNTRIES = [
 const MAX_ADS_FREE = 100;
 const MAX_ADS_PRO = 500;
 
-type ViewState = 'search' | 'preview' | 'imported';
+type ViewState = 'search' | 'processing' | 'preview' | 'imported';
 
 const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNavigateToSettings }) => {
   const { user } = useAuth();
@@ -88,18 +72,46 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
 
   // UI state
   const [viewState, setViewState] = useState<ViewState>('search');
-  const [isSearching, setIsSearching] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Results state
-  const [previewLeads, setPreviewLeads] = useState<ScrapedLead[]>([]);
-  const [duplicateLeads, setDuplicateLeads] = useState<ScrapedLead[]>([]);
+  // Job tracking
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const { job, isCompleted, isFailed, leads, duplicates } = useLeadFinderJob(currentJobId);
+
+  // Results state (for preview)
+  const [previewLeads, setPreviewLeads] = useState<LeadFinderLead[]>([]);
+  const [duplicateLeads, setDuplicateLeads] = useState<LeadFinderLead[]>([]);
   const [searchParams, setSearchParams] = useState<SearchParams | null>(null);
   const [totalFound, setTotalFound] = useState(0);
   const [importedCount, setImportedCount] = useState(0);
 
   const maxAllowed = isPro ? MAX_ADS_PRO : MAX_ADS_FREE;
+
+  // Watch for job completion
+  useEffect(() => {
+    if (isCompleted && job) {
+      // Job completed - move to preview
+      const safeLeads = leads || [];
+      const safeDuplicates = duplicates || [];
+      setPreviewLeads(safeLeads);
+      setDuplicateLeads(safeDuplicates);
+      setSearchParams({
+        keyword: job.keyword,
+        location: job.location,
+        country: job.country,
+      });
+      setTotalFound(job.total_found || 0);
+      setViewState('preview');
+      showToast(`Found ${safeLeads.length} new leads!`, 'success');
+    } else if (isFailed && job) {
+      // Job failed - show error and go back to search
+      setError(job.error_message || 'Search failed. Please try again.');
+      setViewState('search');
+      showToast(job.error_message || 'Search failed', 'error');
+    }
+  }, [isCompleted, isFailed, job, leads, duplicates, showToast]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,7 +131,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
       return;
     }
 
-    setIsSearching(true);
+    setIsStarting(true);
     setError(null);
 
     try {
@@ -150,24 +162,27 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
         throw new Error(errorData.error || `Request failed with status ${response.status}`);
       }
 
-      const data: FindLeadsResponse = await response.json();
+      const data: StartJobResponse = await response.json();
 
-      if (!data.success) {
-        throw new Error('Failed to search for leads');
+      if (!data.success || !data.job_id) {
+        throw new Error('Failed to start search');
       }
 
-      setPreviewLeads(data.leads);
-      setDuplicateLeads(data.duplicates);
-      setSearchParams(data.search_params);
-      setTotalFound(data.total_found);
-      setViewState('preview');
+      // Store job ID and switch to processing view
+      setCurrentJobId(data.job_id);
+      setSearchParams({
+        keyword: keyword.trim(),
+        location: location.trim() || null,
+        country,
+      });
+      setViewState('processing');
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An unexpected error occurred';
       setError(message);
       showToast(message, 'error');
     } finally {
-      setIsSearching(false);
+      setIsStarting(false);
     }
   };
 
@@ -227,6 +242,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
 
   const handleNewSearch = () => {
     setViewState('search');
+    setCurrentJobId(null);
     setPreviewLeads([]);
     setDuplicateLeads([]);
     setSearchParams(null);
@@ -235,10 +251,58 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
     setError(null);
   };
 
-  // Count leads with specific data
-  const leadsWithFacebook = previewLeads.filter(l => l.facebook_url).length;
-  const leadsWithEmail = previewLeads.filter(l => l.email).length;
-  const leadsWithPhone = previewLeads.filter(l => l.phone).length;
+  const handleCancelSearch = () => {
+    // Just go back to search form - job will continue in background but we won't watch it
+    setCurrentJobId(null);
+    setViewState('search');
+  };
+
+  // Count leads with specific data (safeguard against undefined)
+  const leadsWithFacebook = (previewLeads || []).filter(l => l.facebook_url).length;
+  const leadsWithEmail = (previewLeads || []).filter(l => l.email).length;
+  const leadsWithPhone = (previewLeads || []).filter(l => l.phone).length;
+
+  // Render processing view
+  if (viewState === 'processing') {
+    return (
+      <div className="max-w-2xl mx-auto p-6">
+        <div className={`bg-white p-8 ${radius.md} ${shadows.sm} border border-slate-200 text-center`}>
+          <Loader2 size={48} className="text-blue-600 mx-auto mb-4 animate-spin" />
+          <h2 className="text-xl font-semibold text-slate-800 mb-2">Searching for Leads</h2>
+          <p className="text-slate-600 mb-2">
+            {searchParams?.keyword}
+            {searchParams?.location && ` in ${searchParams.location}`}
+            {searchParams?.country && `, ${searchParams.country}`}
+          </p>
+
+          {/* Progress info */}
+          <div className="mt-6 mb-6">
+            <div className="w-full bg-slate-200 rounded-full h-2 mb-2">
+              <div
+                className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                style={{ width: `${job?.progress || 10}%` }}
+              />
+            </div>
+            <p className="text-sm text-slate-500">
+              {job?.stage_message || 'Starting search...'}
+            </p>
+          </div>
+
+          <p className="text-sm text-slate-500 mb-6">
+            This may take a few minutes. We're scraping Google Maps and extracting contact details for each business.
+          </p>
+
+          <button
+            onClick={handleCancelSearch}
+            className={`py-2 px-4 text-slate-600 hover:text-slate-800 hover:bg-slate-100 ${radius.md} ${transitions.fast} inline-flex items-center gap-2`}
+          >
+            <XCircle size={16} />
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Render search form
   if (viewState === 'search') {
@@ -278,7 +342,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
                   onChange={(e) => setKeyword(e.target.value)}
                   placeholder="e.g., plumber, electrician, dentist"
                   className={`w-full pl-10 pr-4 py-2.5 border border-slate-200 ${radius.md} focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${transitions.fast}`}
-                  disabled={isSearching}
+                  disabled={isStarting}
                 />
               </div>
             </div>
@@ -296,7 +360,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
                   onChange={(e) => setLocation(e.target.value)}
                   placeholder="e.g., Sydney, Los Angeles, London"
                   className={`w-full pl-10 pr-4 py-2.5 border border-slate-200 ${radius.md} focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${transitions.fast}`}
-                  disabled={isSearching}
+                  disabled={isStarting}
                 />
               </div>
             </div>
@@ -312,7 +376,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
                   value={country}
                   onChange={(e) => setCountry(e.target.value)}
                   className={`w-full pl-10 pr-4 py-2.5 border border-slate-200 ${radius.md} focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${transitions.fast} appearance-none bg-white`}
-                  disabled={isSearching}
+                  disabled={isStarting}
                 >
                   {COUNTRIES.map((c) => (
                     <option key={c.code} value={c.code}>
@@ -337,7 +401,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
                   min={1}
                   max={maxAllowed}
                   className={`w-full pl-10 pr-4 py-2.5 border border-slate-200 ${radius.md} focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${transitions.fast}`}
-                  disabled={isSearching}
+                  disabled={isStarting}
                 />
               </div>
               <p className="text-xs text-slate-500 mt-1">
@@ -358,13 +422,13 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isSearching || !keyword.trim()}
+            disabled={isStarting || !keyword.trim()}
             className={`w-full py-3 px-4 bg-blue-600 text-white font-medium ${radius.md} hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed ${transitions.fast} flex items-center justify-center gap-2`}
           >
-            {isSearching ? (
+            {isStarting ? (
               <>
                 <Loader2 size={18} className="animate-spin" />
-                Searching... This may take a minute
+                Starting search...
               </>
             ) : (
               <>

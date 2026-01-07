@@ -130,6 +130,12 @@ export const queryKeys = {
   // Pipeline Preferences (column visibility)
   pipelinePreferences: (userId: string | undefined) =>
     ['pipelinePreferences', userId] as const,
+
+  // Lead Finder Jobs
+  leadFinderJob: (userId: string | undefined, jobId: string) =>
+    ['leadFinderJob', userId, jobId] as const,
+  leadFinderJobs: (userId: string | undefined) =>
+    ['leadFinderJobs', userId] as const,
 } as const;
 
 // Helper for invalidating related queries

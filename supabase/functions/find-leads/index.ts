@@ -1,9 +1,9 @@
 /**
  * find-leads Edge Function
  *
- * Searches for businesses using Modal scraper and returns them for preview.
- * Does NOT auto-import - user reviews leads first, then imports via import-leads endpoint.
- * Calls the Modal webhook: https://luka-50609--lead-scraper-scrape-leads.modal.run
+ * Creates an async job to search for businesses using Modal scraper.
+ * Returns immediately with job_id. Modal calls lead-finder-callback when done.
+ * User previews leads, then imports via import-leads endpoint.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
@@ -23,37 +23,10 @@ interface ModalRequest {
   max_ads?: number;
   include_summary?: boolean;
   include_fb_enrichment?: boolean;
-}
-
-interface ModalLead {
-  company_name: string;
-  website?: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-  rating?: number;
-  review_count?: number;
-  category?: string;
-  facebook_url?: string;
-  instagram_url?: string;
-  linkedin_url?: string;
-}
-
-interface ModalResponse {
-  success: boolean;
-  leads: ModalLead[];
-  total_found: number;
-  message?: string;
-  error?: string;
-}
-
-// Normalize company name for duplicate detection
-function normalizeCompanyName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  // Async callback fields
+  job_id?: string;
+  callback_url?: string;
+  callback_secret?: string;
 }
 
 serve(async (req) => {
@@ -78,6 +51,12 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const callbackSecret = Deno.env.get('LEAD_FINDER_CALLBACK_SECRET') ?? '';
+
+    if (!callbackSecret) {
+      console.error('[find-leads] LEAD_FINDER_CALLBACK_SECRET not configured');
+      return createErrorResponse(req, 'Server configuration error', 500);
+    }
 
     const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } }
@@ -122,8 +101,34 @@ serve(async (req) => {
     // Enforce max_ads limit
     const requestedAds = Math.min(max_ads || 50, maxAllowed);
 
-    // 6. Call Modal webhook
-    console.log(`[find-leads] Calling Modal for user ${user.id}: ${keyword} in ${location || 'any'}, ${country}`);
+    // 6. Create job record
+    const { data: job, error: jobError } = await supabaseAdmin
+      .from('scrape_jobs')
+      .insert({
+        user_id: user.id,
+        job_type: 'lead_finder',
+        keyword: keyword.trim(),
+        location: location?.trim() || null,
+        country: country.toUpperCase(),
+        niche: keyword.trim(), // For compatibility with existing schema
+        max_ads: requestedAds,
+        status: 'pending',
+        stage: 'queued',
+        progress: 0,
+        stage_message: 'Starting search...',
+      })
+      .select('id')
+      .single();
+
+    if (jobError || !job) {
+      console.error('[find-leads] Error creating job:', jobError);
+      return createErrorResponse(req, 'Failed to create search job.', 500);
+    }
+
+    console.log(`[find-leads] Created job ${job.id} for user ${user.id}: ${keyword} in ${location || 'any'}, ${country}`);
+
+    // 7. Call Modal webhook with callback URL (async mode)
+    const callbackUrl = `${supabaseUrl}/functions/v1/lead-finder-callback`;
 
     const modalRequest: ModalRequest = {
       keyword: keyword.trim(),
@@ -131,7 +136,11 @@ serve(async (req) => {
       location: location?.trim() || undefined,
       max_ads: requestedAds,
       include_summary: false,
-      include_fb_enrichment: true,
+      include_fb_enrichment: true, // Re-enabled since we're async now
+      // Async callback fields
+      job_id: job.id,
+      callback_url: callbackUrl,
+      callback_secret: callbackSecret,
     };
 
     const modalResponse = await fetch(MODAL_WEBHOOK_URL, {
@@ -145,65 +154,39 @@ serve(async (req) => {
     if (!modalResponse.ok) {
       const errorText = await modalResponse.text();
       console.error(`[find-leads] Modal error: ${modalResponse.status} - ${errorText}`);
-      return createErrorResponse(req, 'Failed to search for leads. Please try again.', 502);
+
+      // Update job as failed
+      await supabaseAdmin
+        .from('scrape_jobs')
+        .update({
+          status: 'failed',
+          stage: 'failed',
+          error_message: 'Failed to start search. Please try again.',
+        })
+        .eq('id', job.id);
+
+      return createErrorResponse(req, 'Failed to start search. Please try again.', 502);
     }
 
-    const modalData: ModalResponse = await modalResponse.json();
+    const modalData = await modalResponse.json();
+    console.log(`[find-leads] Modal accepted job: ${JSON.stringify(modalData)}`);
 
-    if (!modalData.success) {
-      console.error(`[find-leads] Modal returned error: ${modalData.error || modalData.message}`);
-      return createErrorResponse(req, modalData.error || 'Failed to search for leads.', 502);
-    }
+    // 8. Update job status to processing
+    await supabaseAdmin
+      .from('scrape_jobs')
+      .update({
+        status: 'processing',
+        stage: 'scraping',
+        stage_message: 'Searching for businesses...',
+      })
+      .eq('id', job.id);
 
-    console.log(`[find-leads] Modal returned ${modalData.leads.length} leads (total found: ${modalData.total_found})`);
-
-    // 7. Get existing leads for duplicate detection
-    const { data: existingLeads, error: leadsError } = await supabaseAdmin
-      .from('leads')
-      .select('company_name')
-      .eq('user_id', user.id);
-
-    if (leadsError) {
-      console.error('Error fetching existing leads:', leadsError);
-      return createErrorResponse(req, 'Failed to check for duplicates.', 500);
-    }
-
-    const existingNames = new Set(
-      (existingLeads || []).map(l => normalizeCompanyName(l.company_name))
-    );
-
-    // 8. Separate leads into new and duplicates
-    const newLeads: typeof modalData.leads = [];
-    const duplicateLeads: typeof modalData.leads = [];
-    const seenInBatch = new Set<string>();
-
-    for (const lead of modalData.leads) {
-      if (!lead.company_name) continue;
-      const normalized = normalizeCompanyName(lead.company_name);
-
-      if (existingNames.has(normalized) || seenInBatch.has(normalized)) {
-        duplicateLeads.push(lead);
-      } else {
-        seenInBatch.add(normalized);
-        newLeads.push(lead);
-      }
-    }
-
-    console.log(`[find-leads] Found ${newLeads.length} new leads, ${duplicateLeads.length} duplicates`);
-
-    // 9. Return leads for preview (no auto-import)
+    // 9. Return job ID immediately
     return createSuccessResponse(req, {
       success: true,
-      leads: newLeads,
-      duplicates: duplicateLeads,
-      total_found: modalData.total_found,
-      new_count: newLeads.length,
-      duplicate_count: duplicateLeads.length,
-      search_params: {
-        keyword,
-        location: location || null,
-        country,
-      },
+      job_id: job.id,
+      status: 'processing',
+      message: 'Search started. You will see results when complete.',
     });
 
   } catch (error) {
