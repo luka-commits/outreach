@@ -7,15 +7,23 @@ import { queryKeys } from '../lib/queryClient';
 export interface LeadFinderLead {
   company_name: string;
   website?: string;
-  phone?: string;
   email?: string;
+  phone?: string;
   address?: string;
-  rating?: number;
-  review_count?: number;
-  category?: string;
   facebook_url?: string;
   instagram_url?: string;
   linkedin_url?: string;
+  tiktok_url?: string;
+  youtube_url?: string;
+  twitter_url?: string;
+  category?: string;
+  rating?: number | null;
+  review_count?: number | null;
+  page_likes?: number;
+  ad_count?: number;
+  enrichment_status?: string;
+  contact_name?: string;
+  business_summary?: string;
 }
 
 export interface LeadFinderJob {

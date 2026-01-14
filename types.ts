@@ -501,3 +501,27 @@ export interface ScrapeUrlResponse {
   error?: string;
   partialData?: boolean;
 }
+
+// ============================================
+// Lead Finder History Types
+// ============================================
+
+export interface LeadFinderJobSummary {
+  id: string;
+  keyword: string;
+  location: string | null;
+  country: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  totalFound: number | null;
+  newLeadsCount: number;
+  duplicatesCount: number;
+  createdAt: string;
+}
+
+export interface LeadFinderStats {
+  totalSearches: number;
+  completedSearches: number;
+  totalNewLeads: number;
+  totalDuplicates: number;
+  successRate: number;
+}

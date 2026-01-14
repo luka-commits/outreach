@@ -12,15 +12,22 @@ import { getCorsHeaders, handleCorsPreflightIfNeeded, createErrorResponse, creat
 interface LeadToImport {
   company_name: string;
   website?: string;
-  phone?: string;
   email?: string;
+  phone?: string;
   address?: string;
-  rating?: number;
-  review_count?: number;
-  category?: string;
   facebook_url?: string;
   instagram_url?: string;
   linkedin_url?: string;
+  tiktok_url?: string;
+  youtube_url?: string;
+  twitter_url?: string;
+  category?: string;
+  rating?: number | null;
+  review_count?: number | null;
+  page_likes?: number;
+  ad_count?: number;
+  contact_name?: string;
+  business_summary?: string;
 }
 
 interface ImportRequest {
@@ -94,6 +101,13 @@ serve(async (req) => {
       facebook_url: lead.facebook_url || null,
       instagram_url: lead.instagram_url || null,
       linkedin_url: lead.linkedin_url || null,
+      tiktok_url: lead.tiktok_url || null,
+      youtube_url: lead.youtube_url || null,
+      twitter_url: lead.twitter_url || null,
+      page_likes: lead.page_likes || null,
+      ad_count: lead.ad_count || null,
+      contact_name: lead.contact_name || null,
+      executive_summary: lead.business_summary || null,
       status: 'not_contacted',
       created_at: new Date().toISOString(),
     }));

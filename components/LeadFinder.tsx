@@ -326,7 +326,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
           </div>
 
           <p className="text-sm text-slate-500 mb-6">
-            This may take a few minutes. We're scraping Google Maps and extracting contact details for each business.
+            This may take a few minutes. We're searching Facebook Ads and extracting contact details for each advertiser.
           </p>
 
           <div className="flex items-center justify-center gap-3">
@@ -366,8 +366,8 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
           <h2 className="text-sm font-semibold text-slate-700 mb-3">How It Works</h2>
           <ol className="text-sm text-slate-600 space-y-2 list-decimal list-inside">
             <li>Enter a business type (e.g., "plumber") and optionally a city or region</li>
-            <li>We search Google Maps for matching business listings</li>
-            <li>For each listing, we extract contact info including website, phone, and social links</li>
+            <li>We search Facebook Ads for businesses running ads in your niche</li>
+            <li>For each advertiser, we extract contact info including website, phone, and social links</li>
             <li>Preview the results and import them into your pipeline</li>
           </ol>
         </div>
@@ -451,7 +451,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
                 />
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                How many Google Maps listings to search. Actual leads found may be fewer due to duplicates.
+                How many Facebook Ads to search. Actual leads found may be fewer due to duplicates.
                 {!isPro && ` Free: up to ${MAX_ADS_FREE}. Pro: up to ${MAX_ADS_PRO}.`}
               </p>
             </div>

@@ -21,8 +21,6 @@ interface ModalRequest {
   country: string;
   location?: string;
   max_ads?: number;
-  include_summary?: boolean;
-  include_fb_enrichment?: boolean;
   // Async callback fields
   job_id?: string;
   callback_url?: string;
@@ -135,8 +133,6 @@ serve(async (req) => {
       country: country.toUpperCase(),
       location: location?.trim() || undefined,
       max_ads: requestedAds,
-      include_summary: false,
-      include_fb_enrichment: true, // Re-enabled since we're async now
       // Async callback fields
       job_id: job.id,
       callback_url: callbackUrl,

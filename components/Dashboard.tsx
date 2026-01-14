@@ -1,12 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Instagram, Facebook, Linkedin, Mail, Phone, Footprints, Settings2, ClipboardList, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react';
+import { Instagram, Facebook, Linkedin, Mail, Phone, Footprints, Settings2, AlertCircle, RefreshCw } from 'lucide-react';
 import { useQueries } from '@tanstack/react-query';
 import ConsistencyChart from './shared/ConsistencyChart';
 import { Lead, OutreachGoals, Activity } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigation } from '../contexts/NavigationContext';
 import { useDashboardActivities, useActivitiesPaginatedQuery } from '../hooks/queries/useActivitiesQuery';
-import { useTaskCountsQuery } from '../hooks/queries/useTasksQuery';
 import { getLead } from '../services/supabase';
 import { queryKeys } from '../lib/queryClient';
 import { getErrorMessage } from '../utils/errorMessages';
@@ -67,7 +66,7 @@ const DEFAULT_GOALS: OutreachGoals = {
   walkIn: 5,
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ leads: _leads, activities: _legacyActivities, onStartQueue, onViewLeads, queueCount: _queueCount, todaysTasks: _todaysTasks, goals: propsGoals, onUpdateGoals, onOpenPricing: _onOpenPricing, onOpenSettings: _onOpenSettings }) => {
+const Dashboard: React.FC<DashboardProps> = ({ leads: _leads, activities: _legacyActivities, onStartQueue: _onStartQueue, onViewLeads: _onViewLeads, queueCount: _queueCount, todaysTasks: _todaysTasks, goals: propsGoals, onUpdateGoals, onOpenPricing: _onOpenPricing, onOpenSettings: _onOpenSettings }) => {
   const [timeframe, setTimeframe] = useState<'daily' | 'weekly'>('daily');
   const [isEditingGoals, setIsEditingGoals] = useState(false);
 
@@ -84,18 +83,14 @@ const Dashboard: React.FC<DashboardProps> = ({ leads: _leads, activities: _legac
   // Safe default for activities
   const { data: activities = [], isError: activitiesError, error: activitiesQueryError, refetch: refetchActivities } = useDashboardActivities(user?.id, timeframe);
 
-  // Task counts for quick actions section
-  const { data: taskCounts, isError: taskCountsError, error: taskCountsQueryError, refetch: refetchTaskCounts } = useTaskCountsQuery(user?.id);
-
   // Auto-retry queries when network reconnects
   useEffect(() => {
     const handleOnline = () => {
       refetchActivities();
-      refetchTaskCounts();
     };
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, [refetchActivities, refetchTaskCounts]);
+  }, [refetchActivities]);
 
   // Fetch last 7 days for the chart specifically
   const chartStartDate = useMemo(() => {
@@ -175,8 +170,8 @@ const Dashboard: React.FC<DashboardProps> = ({ leads: _leads, activities: _legac
   }, [activities, timeframe, goals, disabledChannels]);
 
   // Show inline error banner if activities fail to load
-  const hasError = activitiesError || taskCountsError;
-  const queryError = activitiesQueryError || taskCountsQueryError;
+  const hasError = activitiesError;
+  const queryError = activitiesQueryError;
 
   // Get recent activities and unique lead IDs for fetching
   const recentActivities = useMemo(() => activities.slice(0, 5), [activities]);
@@ -235,7 +230,6 @@ const Dashboard: React.FC<DashboardProps> = ({ leads: _leads, activities: _legac
           <button
             onClick={() => {
               refetchActivities();
-              refetchTaskCounts();
             }}
             className="flex items-center gap-2 px-4 py-2 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-md text-sm font-medium transition-colors"
           >
@@ -266,45 +260,6 @@ const Dashboard: React.FC<DashboardProps> = ({ leads: _leads, activities: _legac
           </div>
         </div>
       </header>
-
-      {/* Quick Actions Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Today's Tasks Card */}
-        <div className="bg-white p-6 rounded-xl border border-gray-200/60 hover:shadow-md transition-all duration-150">
-          <div className="flex items-center gap-3 mb-4">
-            <ClipboardList size={20} className="text-gray-400" />
-            <p className="text-sm font-medium text-gray-500">Today's Tasks</p>
-          </div>
-          <p className="text-4xl font-bold text-gray-900 mb-1">{taskCounts?.today ?? 0}</p>
-          <p className="text-sm text-gray-500 mb-4">leads need action</p>
-          <button
-            onClick={onStartQueue}
-            className="flex items-center gap-2 text-pilot-blue hover:text-pilot-blue/80 font-medium text-sm transition-colors duration-150"
-          >
-            Start Queue <ArrowRight size={16} />
-          </button>
-        </div>
-
-        {/* Overdue Card */}
-        <div className={`p-6 rounded-xl border hover:shadow-md transition-all duration-150 ${
-          (taskCounts?.overdue ?? 0) > 0
-            ? 'bg-amber-50 border-amber-200/50'
-            : 'bg-white border-gray-200/60'
-        }`}>
-          <div className="flex items-center gap-3 mb-4">
-            <AlertCircle size={20} className={(taskCounts?.overdue ?? 0) > 0 ? 'text-amber-600' : 'text-gray-400'} />
-            <p className="text-sm font-medium text-gray-500">Overdue</p>
-          </div>
-          <p className="text-4xl font-bold text-gray-900 mb-1">{taskCounts?.overdue ?? 0}</p>
-          <p className="text-sm text-gray-500 mb-4">need attention</p>
-          <button
-            onClick={onViewLeads}
-            className="flex items-center gap-2 text-pilot-blue hover:text-pilot-blue/80 font-medium text-sm transition-colors duration-150"
-          >
-            View Leads <ArrowRight size={16} />
-          </button>
-        </div>
-      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
         <div className="lg:col-span-12 bg-white p-10 rounded-xl border border-gray-200/60 relative overflow-hidden flex flex-col justify-center min-h-[550px]">

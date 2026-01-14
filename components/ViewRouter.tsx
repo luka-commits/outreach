@@ -145,6 +145,7 @@ const ViewRouter: React.FC<ViewRouterProps> = ({
             strategies={strategies}
             onBack={goBack}
             onUpdateLead={onUpdateLead}
+            onDeleteLead={onDeleteLead}
             onAddActivity={onAddActivity}
             onSelectLead={navigateToLead}
           />

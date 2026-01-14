@@ -4,7 +4,7 @@ import {
   Facebook, Sparkles, Loader2, Linkedin, List, ChevronRight,
   PlayCircle, Calendar as CalendarIcon, ChevronLeft, CheckSquare, Trash2,
   MessageSquare, PhoneCall, Filter, Clock, User, History, X, Menu, Reply,
-  MapPin, Briefcase, Globe, Star
+  MapPin, Briefcase, Globe, Star, UserMinus
 } from 'lucide-react';
 import { Lead, Strategy, Activity, CallOutcome, StrategyStep, TaskAction } from '../types';
 import { ACTION_ICONS } from '../constants';
@@ -109,6 +109,7 @@ interface TaskQueueProps {
   strategies: Strategy[];
   onBack: () => void;
   onUpdateLead: (lead: Lead) => void;
+  onDeleteLead: (id: string) => Promise<void>;
   onAddActivity: (leadId: string, action: string, note?: string, isFirstOutreach?: boolean, platform?: Activity['platform'], direction?: Activity['direction']) => void;
   onSelectLead: (id: string) => void;
 }
@@ -139,7 +140,7 @@ const formatRelativeTime = (timestamp: string): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allScheduledTasks, strategies, onBack: _onBack, onUpdateLead, onAddActivity, onSelectLead }) => {
+const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allScheduledTasks, strategies, onBack: _onBack, onUpdateLead, onDeleteLead, onAddActivity, onSelectLead }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [activeFilter, setActiveFilter] = useState<FilterType>('today');
   const [calendarMode, setCalendarMode] = useState<CalendarMode>('week');
@@ -157,9 +158,13 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
   const [personalizing, setPersonalizing] = useState(false);
   const [message, setMessage] = useState('');
 
-  // Delete Confirmation State
+  // Delete Task Confirmation State
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
+
+  // Delete Lead Confirmation State
+  const [deleteLeadConfirmOpen, setDeleteLeadConfirmOpen] = useState(false);
+  const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
 
   // Reschedule Modal State
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
@@ -707,6 +712,24 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     showToast('Task removed from queue', 'success');
   };
 
+  const confirmDeleteLead = (leadId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLeadToDelete(leadId);
+    setDeleteLeadConfirmOpen(true);
+  };
+
+  const handleDeleteLead = async () => {
+    if (!leadToDelete) return;
+    try {
+      await onDeleteLead(leadToDelete);
+      showToast('Lead deleted', 'success');
+      setDeleteLeadConfirmOpen(false);
+      setLeadToDelete(null);
+    } catch {
+      showToast('Failed to delete lead', 'error');
+    }
+  };
+
   const openRescheduleModal = (task: Lead, e: React.MouseEvent) => {
     e.stopPropagation();
     setTaskToReschedule(task);
@@ -747,6 +770,18 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
       message="This will remove this task from your queue. The lead will remain in your pipeline but won't satisfy the strategy step until scheduled again."
       confirmLabel="Remove Task"
       variant="warning"
+    />
+  );
+
+  const deleteLeadModal = (
+    <ConfirmModal
+      isOpen={deleteLeadConfirmOpen}
+      onClose={() => setDeleteLeadConfirmOpen(false)}
+      onConfirm={handleDeleteLead}
+      title="Delete Lead?"
+      message="This will permanently delete this lead and all associated data. This action cannot be undone."
+      confirmLabel="Delete Lead"
+      variant="danger"
     />
   );
 
@@ -1159,6 +1194,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
       return (
         <>
           {deleteModal}
+          {deleteLeadModal}
           {rescheduleModal}
           <SessionSidebar />
           <SidebarToggle />
@@ -1247,6 +1283,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
       return (
         <>
           {deleteModal}
+          {deleteLeadModal}
           {rescheduleModal}
           <SessionSidebar />
           <SidebarToggle />
@@ -1278,6 +1315,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     return (
       <>
         {deleteModal}
+        {deleteLeadModal}
         {rescheduleModal}
         <SessionSidebar />
         <SidebarToggle />
@@ -1625,6 +1663,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     return (
       <>
       {deleteModal}
+      {deleteLeadModal}
       {rescheduleModal}
       <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
@@ -1845,10 +1884,17 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
                           </button>
                           <button
                             onClick={(e) => confirmDeleteTask(task.id, e)}
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-white hover:shadow-sm transition-all"
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-amber-500 hover:bg-white hover:shadow-sm transition-all"
                             title="Remove from queue"
                           >
                             <Trash2 size={16} />
+                          </button>
+                          <button
+                            onClick={(e) => confirmDeleteLead(task.id, e)}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-white hover:shadow-sm transition-all"
+                            title="Delete lead"
+                          >
+                            <UserMinus size={16} />
                           </button>
                           <button className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-indigo-600 hover:bg-white hover:shadow-sm transition-all">
                             <ChevronRight size={18} />
@@ -1904,6 +1950,7 @@ const TaskQueue: React.FC<TaskQueueProps> = ({ todayTasks: _todayTasks, allSched
     return (
       <>
       {deleteModal}
+      {deleteLeadModal}
       {rescheduleModal}
       <div className="space-y-8 animate-in fade-in duration-500 max-w-7xl mx-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">

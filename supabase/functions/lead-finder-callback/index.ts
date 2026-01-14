@@ -11,15 +11,23 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1"
 interface ModalLead {
   company_name: string;
   website?: string;
-  phone?: string;
   email?: string;
+  phone?: string;
   address?: string;
-  rating?: number;
-  review_count?: number;
-  category?: string;
   facebook_url?: string;
   instagram_url?: string;
   linkedin_url?: string;
+  tiktok_url?: string;
+  youtube_url?: string;
+  twitter_url?: string;
+  category?: string;
+  rating?: number | null;
+  review_count?: number | null;
+  page_likes?: number;
+  ad_count?: number;
+  enrichment_status?: string;  // Preview only, not stored
+  contact_name?: string;
+  business_summary?: string;
 }
 
 interface CallbackPayload {

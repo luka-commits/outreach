@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, CallRecord, TwilioCredentials, CallMetrics, GmailCredentials, ResendCredentials, EmailProvider, LeadTag, LeadNote, StrategyPerformance, SavedFilter, DuplicateGroup, MergeConfig, ChannelPerformance, WeeklyTrend, ReportingDashboard, UserPublicProfile, UserActivityMetrics, LeaderboardEntry, UserRankInfo, LeaderboardPeriod, CustomFieldDefinition, CustomFieldValue, CustomFieldType, CustomFieldFormValue, SelectOption, TaskAction, ReplyFollowUp, LostReason, PipelinePreferences } from '../types';
+import { Lead, Activity, Strategy, StrategyStep, OutreachGoals, CallRecord, TwilioCredentials, CallMetrics, GmailCredentials, ResendCredentials, EmailProvider, LeadTag, LeadNote, StrategyPerformance, SavedFilter, DuplicateGroup, MergeConfig, ChannelPerformance, WeeklyTrend, ReportingDashboard, UserPublicProfile, UserActivityMetrics, LeaderboardEntry, UserRankInfo, LeaderboardPeriod, CustomFieldDefinition, CustomFieldValue, CustomFieldType, CustomFieldFormValue, SelectOption, TaskAction, ReplyFollowUp, LostReason, PipelinePreferences, LeadFinderJobSummary, LeadFinderStats } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
