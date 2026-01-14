@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MapPin, Globe, Users, Loader2, AlertCircle, CheckCircle2, ExternalLink, Phone, Mail, Facebook, Instagram, Linkedin, ArrowLeft, Download, XCircle, RefreshCw } from 'lucide-react';
+import { Search, MapPin, Globe, Users, Loader2, AlertCircle, CheckCircle2, ExternalLink, Phone, Mail, Facebook, Instagram, Linkedin, ArrowLeft, Download, XCircle, RefreshCw, History, BarChart3, Clock, Filter } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscription } from '../hooks/useSubscription';
 import { useLeadFinderJob, LeadFinderLead } from '../hooks/useLeadFinderJob';
+import { useLeadFinderHistory, useLeadFinderStats } from '../hooks/queries';
 import { queryClient, queryKeys } from '../lib/queryClient';
 import { useToast } from './Toast';
 import { radius, shadows, transitions } from '../lib/designTokens';
+import { LeadFinderJobSummary } from '../types';
 
 interface LeadFinderProps {
   onNavigateToSettings?: () => void;
@@ -55,14 +57,49 @@ const COUNTRIES = [
 ];
 
 const MAX_ADS_FREE = 100;
-const MAX_ADS_PRO = 500;
+const MAX_ADS_PRO = 10000; // Effectively unlimited for Pro users
 
 type ViewState = 'search' | 'processing' | 'preview' | 'imported';
+type TabState = 'search' | 'history';
+
+// Helper to format relative time
+function formatRelativeTime(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
+// Helper to get country name from code
+function getCountryName(code: string): string {
+  const country = COUNTRIES.find(c => c.code === code);
+  return country?.name || code;
+}
 
 const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNavigateToSettings }) => {
   const { user } = useAuth();
   const { isPro } = useSubscription();
   const { showToast } = useToast();
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<TabState>('search');
+  const [historyPage, setHistoryPage] = useState(0);
+  const PAGE_SIZE = 10;
+
+  // History data
+  const { data: historyData, isLoading: historyLoading } = useLeadFinderHistory({
+    limit: PAGE_SIZE,
+    offset: historyPage * PAGE_SIZE,
+  });
+  const { data: stats, isLoading: statsLoading } = useLeadFinderStats();
 
   // Search form state
   const [keyword, setKeyword] = useState('');
@@ -244,8 +281,10 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
       setImportedCount(data.imported);
       setViewState('imported');
 
-      // Invalidate leads query to show new leads
+      // Invalidate leads and history queries
       queryClient.invalidateQueries({ queryKey: queryKeys.leads(user.id) });
+      queryClient.invalidateQueries({ queryKey: ['leadFinderHistory', user.id] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leadFinderStats(user.id) });
       showToast(`Successfully imported ${data.imported} leads!`, 'success');
 
     } catch (err) {
@@ -350,18 +389,183 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
     );
   }
 
+  // Render history view
+  const renderHistoryView = () => {
+    const jobs = historyData?.jobs || [];
+    const total = historyData?.total || 0;
+    const hasMore = (historyPage + 1) * PAGE_SIZE < total;
+
+    return (
+      <div className="space-y-6">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className={`bg-white p-4 ${radius.md} ${shadows.sm} border border-slate-200`}>
+            <div className="flex items-center gap-2 mb-1">
+              <Search size={16} className="text-slate-400" />
+              <p className="text-xs text-slate-500">Total Searches</p>
+            </div>
+            <p className="text-2xl font-semibold text-slate-800">
+              {statsLoading ? '–' : stats?.totalSearches || 0}
+            </p>
+          </div>
+          <div className={`bg-white p-4 ${radius.md} ${shadows.sm} border border-emerald-200 bg-emerald-50`}>
+            <div className="flex items-center gap-2 mb-1">
+              <Users size={16} className="text-emerald-500" />
+              <p className="text-xs text-slate-500">New Leads Found</p>
+            </div>
+            <p className="text-2xl font-semibold text-emerald-600">
+              {statsLoading ? '–' : stats?.totalNewLeads || 0}
+            </p>
+          </div>
+          <div className={`bg-white p-4 ${radius.md} ${shadows.sm} border border-slate-200`}>
+            <div className="flex items-center gap-2 mb-1">
+              <Filter size={16} className="text-slate-400" />
+              <p className="text-xs text-slate-500">Duplicates Filtered</p>
+            </div>
+            <p className="text-2xl font-semibold text-slate-400">
+              {statsLoading ? '–' : stats?.totalDuplicates || 0}
+            </p>
+          </div>
+          <div className={`bg-white p-4 ${radius.md} ${shadows.sm} border border-blue-200 bg-blue-50`}>
+            <div className="flex items-center gap-2 mb-1">
+              <BarChart3 size={16} className="text-blue-500" />
+              <p className="text-xs text-slate-500">Success Rate</p>
+            </div>
+            <p className="text-2xl font-semibold text-blue-600">
+              {statsLoading ? '–' : `${Math.round(stats?.successRate || 0)}%`}
+            </p>
+          </div>
+        </div>
+
+        {/* History List */}
+        <div>
+          <h3 className="text-sm font-medium text-slate-700 mb-3">Recent Searches</h3>
+
+          {historyLoading ? (
+            <div className={`bg-white p-8 ${radius.md} ${shadows.sm} border border-slate-200 text-center`}>
+              <Loader2 size={24} className="text-slate-400 mx-auto animate-spin" />
+              <p className="text-sm text-slate-500 mt-2">Loading history...</p>
+            </div>
+          ) : jobs.length === 0 ? (
+            <div className={`bg-slate-50 p-8 ${radius.md} border border-slate-200 text-center`}>
+              <History size={32} className="text-slate-300 mx-auto mb-2" />
+              <p className="text-slate-600">No searches yet</p>
+              <p className="text-sm text-slate-500 mt-1">Start your first search to see history here</p>
+            </div>
+          ) : (
+            <div className={`bg-white ${radius.md} ${shadows.sm} border border-slate-200 overflow-hidden`}>
+              {jobs.map((job: LeadFinderJobSummary, index: number) => (
+                <div
+                  key={job.id}
+                  className={`p-4 ${index !== jobs.length - 1 ? 'border-b border-slate-100' : ''}`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-medium text-slate-800 truncate">{job.keyword}</h4>
+                        {job.status === 'completed' && (
+                          <span className={`px-1.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 ${radius.sm}`}>
+                            Completed
+                          </span>
+                        )}
+                        {job.status === 'failed' && (
+                          <span className={`px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 ${radius.sm}`}>
+                            Failed
+                          </span>
+                        )}
+                        {(job.status === 'pending' || job.status === 'processing') && (
+                          <span className={`px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 ${radius.sm}`}>
+                            In Progress
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-slate-500">
+                        {job.location && `${job.location}, `}{getCountryName(job.country)}
+                      </p>
+                      {job.status === 'completed' && (
+                        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                          <span>{job.totalFound || 0} scraped</span>
+                          <span className="text-emerald-600">{job.newLeadsCount} new</span>
+                          <span className="text-slate-400">{job.duplicatesCount} duplicates</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-slate-400">
+                      <Clock size={12} />
+                      {formatRelativeTime(job.createdAt)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Load More */}
+          {hasMore && (
+            <button
+              onClick={() => setHistoryPage(p => p + 1)}
+              className={`w-full mt-4 py-2 text-sm text-slate-600 hover:text-slate-800 hover:bg-slate-50 ${radius.md} ${transitions.fast} border border-slate-200`}
+            >
+              Load More
+            </button>
+          )}
+
+          {total > 0 && (
+            <p className="text-xs text-slate-400 text-center mt-2">
+              Showing {Math.min((historyPage + 1) * PAGE_SIZE, total)} of {total} searches
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Render search form
   if (viewState === 'search') {
     return (
       <div className="max-w-2xl mx-auto p-6">
+        {/* Header with Tabs */}
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-navy mb-2">Lead Finder</h1>
-          <p className="text-slate-600">
+          <p className="text-slate-600 mb-4">
             Search for businesses and import them directly as leads
           </p>
+
+          {/* Tab Bar */}
+          <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit">
+            <button
+              onClick={() => setActiveTab('search')}
+              className={`px-4 py-2 text-sm font-medium rounded-md ${transitions.fast} ${
+                activeTab === 'search'
+                  ? 'bg-white text-slate-800 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Search size={16} />
+                Find Leads
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`px-4 py-2 text-sm font-medium rounded-md ${transitions.fast} ${
+                activeTab === 'history'
+                  ? 'bg-white text-slate-800 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <History size={16} />
+                History
+              </span>
+            </button>
+          </div>
         </div>
 
-        {/* How It Works */}
+        {/* Tab Content */}
+        {activeTab === 'history' ? renderHistoryView() : (
+          <>
+            {/* How It Works */}
         <div className={`bg-slate-50 p-5 ${radius.md} mb-6 border border-slate-200`}>
           <h2 className="text-sm font-semibold text-slate-700 mb-3">How It Works</h2>
           <ol className="text-sm text-slate-600 space-y-2 list-decimal list-inside">
@@ -452,7 +656,7 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
               </div>
               <p className="text-xs text-slate-500 mt-1">
                 How many Facebook Ads to search. Actual leads found may be fewer due to duplicates.
-                {!isPro && ` Free: up to ${MAX_ADS_FREE}. Pro: up to ${MAX_ADS_PRO}.`}
+                {!isPro && ` Free: up to ${MAX_ADS_FREE}. Pro: unlimited.`}
               </p>
             </div>
           </div>
@@ -484,6 +688,8 @@ const LeadFinder: React.FC<LeadFinderProps> = ({ onNavigateToSettings: _onNaviga
             )}
           </button>
         </form>
+          </>
+        )}
       </div>
     );
   }
