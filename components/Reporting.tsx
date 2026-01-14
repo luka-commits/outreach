@@ -12,6 +12,8 @@ const funnelColors = {
   inProgress: { primary: '#F59E0B', light: '#FCD34D' },    // amber
   replied: { primary: '#3B82F6', light: '#93C5FD' },       // pilot-blue
   qualified: { primary: '#10B981', light: '#6EE7B7' },     // emerald
+  noReply: { primary: '#64748B', light: '#94A3B8' },       // slate-500
+  disqualified: { primary: '#F43F5E', light: '#FDA4AF' },  // rose
 };
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -169,7 +171,7 @@ const Reporting: React.FC<ReportingProps> = ({ onNavigateToPricing }) => {
 
           {/* Funnel Visualization */}
           <div className="mb-8">
-            <PipelineFunnel data={pipelineData} />
+            <GHLFunnel data={pipelineData} />
           </div>
 
           {/* Alert Card */}
@@ -563,269 +565,155 @@ const CallOutcomeCard = React.memo<{
 });
 CallOutcomeCard.displayName = 'CallOutcomeCard';
 
-// --- Funnel Visualization Components ---
+// --- GHL-Style Pipeline Funnel ---
 
-interface FunnelFlowProps {
-  index: number;
-  fromCount: number;
-  toCount: number;
-  maxCount: number;
-  stageWidth: number;
-  height: number;
-  fromColor: string;
-  toColor: string;
-}
+// Stage configuration
+const STAGE_CONFIG: Record<string, {
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  colorKey: keyof typeof funnelColors;
+  bgClass: string;
+  textClass: string;
+}> = {
+  notContacted: { label: 'Not Contacted', icon: Users, colorKey: 'notContacted', bgClass: 'bg-slate-100', textClass: 'text-slate-500' },
+  inProgress: { label: 'In Progress', icon: Clock, colorKey: 'inProgress', bgClass: 'bg-amber-50', textClass: 'text-amber-500' },
+  replied: { label: 'Replied', icon: MessageCircle, colorKey: 'replied', bgClass: 'bg-blue-50', textClass: 'text-blue-500' },
+  qualified: { label: 'Qualified', icon: CheckCircle, colorKey: 'qualified', bgClass: 'bg-emerald-50', textClass: 'text-emerald-500' },
+  noReply: { label: 'No Reply', icon: Clock, colorKey: 'noReply', bgClass: 'bg-slate-100', textClass: 'text-slate-500' },
+  disqualified: { label: 'Disqualified', icon: UserX, colorKey: 'disqualified', bgClass: 'bg-rose-50', textClass: 'text-rose-500' },
+};
 
-const FunnelFlow = React.memo<FunnelFlowProps>(({
-  index,
-  fromCount,
-  toCount,
-  maxCount,
-  stageWidth,
-  height,
-  fromColor,
-  toColor,
-}) => {
-  const maxFlowHeight = height * 0.7;
-  const fromHeight = maxCount > 0 ? (fromCount / maxCount) * maxFlowHeight : 0;
-  const toHeight = maxCount > 0 ? (toCount / maxCount) * maxFlowHeight : 0;
+const STAGE_ORDER = ['notContacted', 'inProgress', 'replied', 'qualified', 'noReply', 'disqualified'] as const;
 
-  // X positions - leave space for stage labels
-  const startX = (index + 0.5) * stageWidth + stageWidth * 0.2;
-  const endX = (index + 1.5) * stageWidth - stageWidth * 0.2;
-  const midX = (startX + endX) / 2;
-
-  // Y center
-  const centerY = height / 2;
-
-  // Create bezier path for flowing curve
-  const path = `
-    M ${startX} ${centerY - fromHeight / 2}
-    C ${midX} ${centerY - fromHeight / 2},
-      ${midX} ${centerY - toHeight / 2},
-      ${endX} ${centerY - toHeight / 2}
-    L ${endX} ${centerY + toHeight / 2}
-    C ${midX} ${centerY + toHeight / 2},
-      ${midX} ${centerY + fromHeight / 2},
-      ${startX} ${centerY + fromHeight / 2}
-    Z
-  `;
-
-  const gradientId = `flow-grad-${index}`;
-
-  return (
-    <g>
-      <defs>
-        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor={fromColor} stopOpacity="0.6" />
-          <stop offset="100%" stopColor={toColor} stopOpacity="0.4" />
-        </linearGradient>
-      </defs>
-      <path
-        d={path}
-        fill={`url(#${gradientId})`}
-        className="transition-all duration-700 ease-out"
-        style={{
-          filter: 'drop-shadow(0 2px 4px rgba(0, 0, 0, 0.05))',
-        }}
-      />
-    </g>
-  );
-});
-FunnelFlow.displayName = 'FunnelFlow';
-
-interface FunnelStageNewProps {
-  stageKey: string;
+interface FunnelStageData {
+  key: string;
   label: string;
   count: number;
-  percentage: number;
+  barWidth: number;
+  cumulativePercent: number;
+  conversionPercent: number;
   color: { primary: string; light: string };
   icon: React.ComponentType<{ size?: number; className?: string }>;
-  index: number;
+  bgClass: string;
+  textClass: string;
 }
 
-const FunnelStageNew = React.memo<FunnelStageNewProps>(({
-  stageKey,
-  label,
-  count,
-  percentage,
-  color,
-  icon: Icon,
-  index,
-}) => {
-  // Map color to Tailwind classes for icons
-  const iconColorClass = {
-    notContacted: 'text-slate-400',
-    inProgress: 'text-amber-500',
-    replied: 'text-blue-500',
-    qualified: 'text-emerald-500',
-  }[stageKey] || 'text-slate-500';
+interface GHLFunnelRowProps {
+  stage: FunnelStageData;
+  index: number;
+  maxBarWidth: number;
+}
 
-  const bgColorClass = {
-    notContacted: 'bg-slate-100',
-    inProgress: 'bg-amber-50',
-    replied: 'bg-blue-50',
-    qualified: 'bg-emerald-50',
-  }[stageKey] || 'bg-slate-100';
+const GHLFunnelRow = React.memo<GHLFunnelRowProps>(({ stage, index, maxBarWidth }) => {
+  const Icon = stage.icon;
 
   return (
     <div
-      className="flex flex-col items-center text-center"
-      style={{
-        animation: `fadeInUp 0.5s ease-out ${index * 0.1}s both`,
-      }}
+      className="flex items-center gap-4 py-3 border-b border-slate-100 last:border-b-0"
+      style={{ animation: `fadeInUp 0.4s ease-out ${index * 0.08}s both` }}
     >
-      {/* Icon */}
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${bgColorClass}`}>
-        <Icon size={18} className={iconColorClass} />
+      {/* Stage icon and label */}
+      <div className="flex items-center gap-3 w-40 shrink-0">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${stage.bgClass}`}>
+          <Icon size={16} className={stage.textClass} />
+        </div>
+        <div className="min-w-0">
+          <span className="text-sm font-bold text-slate-800 block truncate">{stage.label}</span>
+        </div>
       </div>
-
-      {/* Label */}
-      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-        {label}
-      </span>
-
-      {/* Percentage (large) */}
-      <span
-        className="text-2xl font-black tracking-tight mb-0.5"
-        style={{ color: color.primary }}
-      >
-        {percentage.toFixed(1)}%
-      </span>
 
       {/* Count */}
-      <span className="text-sm font-bold text-slate-500">
-        {count.toLocaleString()}
-      </span>
-    </div>
-  );
-});
-FunnelStageNew.displayName = 'FunnelStageNew';
+      <div className="w-16 text-right shrink-0">
+        <span className="text-sm font-black text-slate-900">{stage.count.toLocaleString()}</span>
+      </div>
 
-interface FunnelDropoffProps {
-  noReply: number;
-  disqualified: number;
-  total: number;
-}
-
-const FunnelDropoff = React.memo<FunnelDropoffProps>(({ noReply, disqualified, total }) => {
-  const noReplyPercent = total > 0 ? (noReply / total) * 100 : 0;
-  const disqualifiedPercent = total > 0 ? (disqualified / total) * 100 : 0;
-
-  return (
-    <div className="flex flex-wrap gap-3 mt-6 justify-center">
-      {/* No Reply Card */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-xl border border-slate-200">
-        <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center">
-          <Clock size={16} className="text-slate-500" />
-        </div>
-        <div>
-          <p className="text-sm font-bold text-slate-700">No Reply</p>
-          <p className="text-xs text-slate-500">
-            {noReply.toLocaleString()} ({noReplyPercent.toFixed(1)}%)
-          </p>
+      {/* Bar */}
+      <div className="flex-1 min-w-0">
+        <div className="h-7 bg-slate-100 rounded-lg overflow-hidden">
+          <div
+            className="h-full rounded-lg transition-all duration-700 ease-out"
+            style={{
+              width: `${Math.max((stage.count / maxBarWidth) * 100, stage.count > 0 ? 3 : 0)}%`,
+              backgroundColor: stage.color.primary,
+            }}
+          />
         </div>
       </div>
 
-      {/* Disqualified Card */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-rose-50 rounded-xl border border-rose-200">
-        <div className="w-8 h-8 bg-rose-100 rounded-lg flex items-center justify-center">
-          <UserX size={16} className="text-rose-500" />
-        </div>
-        <div>
-          <p className="text-sm font-bold text-rose-700">Disqualified</p>
-          <p className="text-xs text-rose-500">
-            {disqualified.toLocaleString()} ({disqualifiedPercent.toFixed(1)}%)
-          </p>
-        </div>
+      {/* Cumulative % */}
+      <div className="w-20 text-right shrink-0">
+        <span className="text-sm font-bold text-slate-600">{stage.cumulativePercent.toFixed(1)}%</span>
+      </div>
+
+      {/* Conversion % */}
+      <div className="w-20 text-right shrink-0">
+        <span className={`text-sm font-bold ${
+          stage.conversionPercent >= 50 ? 'text-emerald-600' :
+          stage.conversionPercent >= 20 ? 'text-slate-600' :
+          'text-amber-600'
+        }`}>
+          {stage.conversionPercent.toFixed(1)}%
+        </span>
       </div>
     </div>
   );
 });
-FunnelDropoff.displayName = 'FunnelDropoff';
+GHLFunnelRow.displayName = 'GHLFunnelRow';
 
-interface MobileFunnelProps {
-  stages: Array<{
-    key: string;
-    label: string;
-    count: number;
-    percentage: number;
-    color: { primary: string; light: string };
-    icon: React.ComponentType<{ size?: number; className?: string }>;
-  }>;
-  noReply: number;
-  disqualified: number;
-  total: number;
-}
-
-const MobileFunnel = React.memo<MobileFunnelProps>(({ stages, noReply, disqualified, total }) => {
-  // Map stage keys to Tailwind classes
-  const getIconClasses = (key: string) => {
-    const iconMap: Record<string, { bg: string; text: string }> = {
-      notContacted: { bg: 'bg-slate-100', text: 'text-slate-400' },
-      inProgress: { bg: 'bg-amber-50', text: 'text-amber-500' },
-      replied: { bg: 'bg-blue-50', text: 'text-blue-500' },
-      qualified: { bg: 'bg-emerald-50', text: 'text-emerald-500' },
-    };
-    return iconMap[key] || { bg: 'bg-slate-100', text: 'text-slate-500' };
-  };
-
-  const getTextColorClass = (key: string) => {
-    const textMap: Record<string, string> = {
-      notContacted: 'text-slate-400',
-      inProgress: 'text-amber-500',
-      replied: 'text-blue-500',
-      qualified: 'text-emerald-500',
-    };
-    return textMap[key] || 'text-slate-500';
-  };
-
-  const getBarColorClass = (key: string) => {
-    const barMap: Record<string, string> = {
-      notContacted: 'bg-slate-400',
-      inProgress: 'bg-amber-500',
-      replied: 'bg-blue-500',
-      qualified: 'bg-emerald-500',
-    };
-    return barMap[key] || 'bg-slate-500';
-  };
+// Mobile version of funnel row
+const GHLFunnelRowMobile = React.memo<GHLFunnelRowProps>(({ stage, index, maxBarWidth }) => {
+  const Icon = stage.icon;
 
   return (
-    <div className="space-y-4">
-      {stages.map((stage) => {
-        const Icon = stage.icon;
-        const iconClasses = getIconClasses(stage.key);
-        return (
-          <div key={stage.key} className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${iconClasses.bg}`}>
-              <Icon size={20} className={iconClasses.text} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between mb-1.5">
-                <span className="text-sm font-bold text-slate-700">{stage.label}</span>
-                <span className={`text-sm font-black ${getTextColorClass(stage.key)}`}>
-                  {stage.count.toLocaleString()}
-                </span>
-              </div>
-              <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-700 ${getBarColorClass(stage.key)}`}
-                  style={{ width: `${Math.max(stage.percentage, 2)}%` }}
-                />
-              </div>
-              <p className="text-xs text-slate-400 mt-1">{stage.percentage.toFixed(1)}%</p>
-            </div>
+    <div
+      className="bg-white rounded-xl border border-slate-200 p-4"
+      style={{ animation: `fadeInUp 0.4s ease-out ${index * 0.08}s both` }}
+    >
+      {/* Header: Icon, Label, Count */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${stage.bgClass}`}>
+            <Icon size={16} className={stage.textClass} />
           </div>
-        );
-      })}
+          <span className="text-sm font-bold text-slate-800">{stage.label}</span>
+        </div>
+        <span className="text-lg font-black text-slate-900">{stage.count.toLocaleString()}</span>
+      </div>
 
-      <FunnelDropoff noReply={noReply} disqualified={disqualified} total={total} />
+      {/* Bar */}
+      <div className="h-3 bg-slate-100 rounded-full overflow-hidden mb-3">
+        <div
+          className="h-full rounded-full transition-all duration-700 ease-out"
+          style={{
+            width: `${Math.max((stage.count / maxBarWidth) * 100, stage.count > 0 ? 3 : 0)}%`,
+            backgroundColor: stage.color.primary,
+          }}
+        />
+      </div>
+
+      {/* Metrics */}
+      <div className="flex justify-between text-xs">
+        <div>
+          <span className="text-slate-400 uppercase tracking-wider font-bold">Cumulative</span>
+          <span className="ml-2 font-bold text-slate-600">{stage.cumulativePercent.toFixed(1)}%</span>
+        </div>
+        <div>
+          <span className="text-slate-400 uppercase tracking-wider font-bold">Conversion</span>
+          <span className={`ml-2 font-bold ${
+            stage.conversionPercent >= 50 ? 'text-emerald-600' :
+            stage.conversionPercent >= 20 ? 'text-slate-600' :
+            'text-amber-600'
+          }`}>
+            {stage.conversionPercent.toFixed(1)}%
+          </span>
+        </div>
+      </div>
     </div>
   );
 });
-MobileFunnel.displayName = 'MobileFunnel';
+GHLFunnelRowMobile.displayName = 'GHLFunnelRowMobile';
 
-interface PipelineFunnelProps {
+interface GHLFunnelProps {
   data: {
     total: number;
     notContacted: number;
@@ -837,68 +725,83 @@ interface PipelineFunnelProps {
   };
 }
 
-const PipelineFunnel = React.memo<PipelineFunnelProps>(({ data }) => {
+const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 700, height: 200 });
+  const [isMobile, setIsMobile] = useState(false);
 
-  // Responsive dimension tracking
+  // Responsive detection
   useEffect(() => {
     if (!containerRef.current) return;
 
     const observer = new ResizeObserver(entries => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width } = entry.contentRect;
-      setDimensions({
-        width: Math.max(width, 300),
-        height: width < 640 ? 400 : 200,
-      });
+      const width = entries[0]?.contentRect.width ?? 0;
+      setIsMobile(width < 640);
     });
 
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, []);
 
-  // Stage data with calculations
-  const stages = useMemo(() => [
-    { key: 'notContacted', label: 'Not Contacted', count: data.notContacted, color: funnelColors.notContacted, icon: Users },
-    { key: 'inProgress', label: 'In Progress', count: data.inProgress, color: funnelColors.inProgress, icon: Clock },
-    { key: 'replied', label: 'Replied', count: data.replied, color: funnelColors.replied, icon: MessageCircle },
-    { key: 'qualified', label: 'Qualified', count: data.qualified, color: funnelColors.qualified, icon: CheckCircle },
-  ].map(stage => ({
-    ...stage,
-    percentage: data.total > 0 ? (stage.count / data.total) * 100 : 0,
-  })), [data]);
+  // Calculate funnel metrics
+  const stages = useMemo((): FunnelStageData[] => {
+    const total = data.total;
+    if (total === 0) return [];
 
-  // Flow connections between stages
-  const flows = useMemo(() => {
-    const result: Array<{ from: typeof stages[0]; to: typeof stages[0] }> = [];
-    for (let i = 0; i < stages.length - 1; i++) {
-      const from = stages[i];
-      const to = stages[i + 1];
-      if (from && to) {
-        result.push({ from, to });
+    const counts: Record<string, number> = {
+      notContacted: data.notContacted,
+      inProgress: data.inProgress,
+      replied: data.replied,
+      qualified: data.qualified,
+      noReply: data.noReply,
+      disqualified: data.disqualified,
+    };
+
+    // Calculate metrics for each stage
+    return STAGE_ORDER.map((key, index) => {
+      const count = counts[key] || 0;
+      const config = STAGE_CONFIG[key]!;
+
+      // Cumulative %: leads at this stage or beyond (sum of this + all later stages)
+      const leadsAtOrBeyond = STAGE_ORDER
+        .slice(index)
+        .reduce((sum, k) => sum + (counts[k] || 0), 0);
+      const cumulativePercent = total > 0 ? (leadsAtOrBeyond / total) * 100 : 0;
+
+      // Conversion %: from previous stage to this stage
+      let conversionPercent = 100;
+      if (index > 0) {
+        const prevKey = STAGE_ORDER[index - 1]!;
+        const prevCount = counts[prevKey] || 0;
+        conversionPercent = prevCount > 0 ? (count / prevCount) * 100 : 0;
       }
-    }
-    return result;
+
+      return {
+        key,
+        label: config.label,
+        count,
+        barWidth: count,
+        cumulativePercent,
+        conversionPercent,
+        color: funnelColors[config.colorKey],
+        icon: config.icon,
+        bgClass: config.bgClass,
+        textClass: config.textClass,
+      };
+    });
+  }, [data]);
+
+  // Max count for bar scaling
+  const maxBarWidth = useMemo(() => {
+    return Math.max(...stages.map(s => s.count), 1);
   }, [stages]);
 
-  const isMobile = dimensions.width < 640;
-
-  if (isMobile) {
+  if (stages.length === 0) {
     return (
-      <div ref={containerRef} className="w-full">
-        <MobileFunnel
-          stages={stages}
-          noReply={data.noReply}
-          disqualified={data.disqualified}
-          total={data.total}
-        />
+      <div className="text-center py-8 text-slate-400">
+        No lead data available
       </div>
     );
   }
-
-  const stageWidth = dimensions.width / 4;
 
   return (
     <div ref={containerRef} className="w-full">
@@ -916,56 +819,52 @@ const PipelineFunnel = React.memo<PipelineFunnelProps>(({ data }) => {
         }
       `}</style>
 
-      {/* Main funnel visualization */}
-      <div className="relative" style={{ height: dimensions.height }}>
-        {/* SVG for flow paths */}
-        <svg
-          viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
-          className="absolute inset-0 w-full h-full"
-          preserveAspectRatio="xMidYMid meet"
-        >
-          {/* Flow paths */}
-          {flows.map((flow, i) => (
-            <FunnelFlow
-              key={i}
-              index={i}
-              fromCount={flow.from.count}
-              toCount={flow.to.count}
-              maxCount={data.total}
-              stageWidth={stageWidth}
-              height={dimensions.height}
-              fromColor={flow.from.color.primary}
-              toColor={flow.to.color.primary}
-            />
-          ))}
-        </svg>
-
-        {/* Stage overlays (positioned over SVG) */}
-        <div className="absolute inset-0 flex justify-around items-center">
-          {stages.map((stage, i) => (
-            <FunnelStageNew
+      {isMobile ? (
+        /* Mobile: Card layout */
+        <div className="space-y-3">
+          {stages.map((stage, index) => (
+            <GHLFunnelRowMobile
               key={stage.key}
-              stageKey={stage.key}
-              label={stage.label}
-              count={stage.count}
-              percentage={stage.percentage}
-              color={stage.color}
-              icon={stage.icon}
-              index={i}
+              stage={stage}
+              index={index}
+              maxBarWidth={maxBarWidth}
             />
           ))}
         </div>
-      </div>
+      ) : (
+        /* Desktop: Table layout */
+        <div>
+          {/* Header */}
+          <div className="flex items-center gap-4 py-2 border-b border-slate-200 mb-1">
+            <div className="w-40 shrink-0">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Stage</span>
+            </div>
+            <div className="w-16 text-right shrink-0">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Leads</span>
+            </div>
+            <div className="flex-1 min-w-0" />
+            <div className="w-20 text-right shrink-0">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cumulative</span>
+            </div>
+            <div className="w-20 text-right shrink-0">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Conversion</span>
+            </div>
+          </div>
 
-      {/* Dropoff indicators */}
-      <FunnelDropoff
-        noReply={data.noReply}
-        disqualified={data.disqualified}
-        total={data.total}
-      />
+          {/* Rows */}
+          {stages.map((stage, index) => (
+            <GHLFunnelRow
+              key={stage.key}
+              stage={stage}
+              index={index}
+              maxBarWidth={maxBarWidth}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 });
-PipelineFunnel.displayName = 'PipelineFunnel';
+GHLFunnel.displayName = 'GHLFunnel';
 
 export default Reporting;
