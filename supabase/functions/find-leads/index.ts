@@ -14,7 +14,7 @@ const MODAL_WEBHOOK_URL = 'https://luka-50609--lead-scraper-scrape-leads.modal.r
 
 // Limits
 const MAX_ADS_FREE = 100;
-const MAX_ADS_PRO = 500;
+const MAX_ADS_PRO = 10000; // Effectively unlimited for Pro users
 
 interface ModalRequest {
   keyword: string;
