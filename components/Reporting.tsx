@@ -583,7 +583,10 @@ const STAGE_CONFIG: Record<string, {
   disqualified: { label: 'Disqualified', icon: UserX, colorKey: 'disqualified', bgClass: 'bg-rose-50', textClass: 'text-rose-500' },
 };
 
-const STAGE_ORDER = ['notContacted', 'inProgress', 'replied', 'qualified', 'noReply', 'disqualified'] as const;
+// Funnel stages (linear progression)
+const FUNNEL_STAGES = ['notContacted', 'inProgress', 'replied', 'qualified'] as const;
+// Dropoff stages (exits from funnel, shown separately)
+const DROPOFF_STAGES = ['noReply', 'disqualified'] as const;
 
 interface FunnelStageData {
   key: string;
@@ -742,8 +745,8 @@ const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
     return () => observer.disconnect();
   }, []);
 
-  // Calculate funnel metrics
-  const stages = useMemo((): FunnelStageData[] => {
+  // Calculate funnel metrics (only for main funnel stages)
+  const funnelStages = useMemo((): FunnelStageData[] => {
     const total = data.total;
     if (total === 0) return [];
 
@@ -752,17 +755,15 @@ const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
       inProgress: data.inProgress,
       replied: data.replied,
       qualified: data.qualified,
-      noReply: data.noReply,
-      disqualified: data.disqualified,
     };
 
-    // Calculate metrics for each stage
-    return STAGE_ORDER.map((key, index) => {
+    // Calculate metrics for funnel stages only
+    return FUNNEL_STAGES.map((key, index) => {
       const count = counts[key] || 0;
       const config = STAGE_CONFIG[key]!;
 
-      // Cumulative %: leads at this stage or beyond (sum of this + all later stages)
-      const leadsAtOrBeyond = STAGE_ORDER
+      // Cumulative %: leads at this stage or beyond in the funnel
+      const leadsAtOrBeyond = FUNNEL_STAGES
         .slice(index)
         .reduce((sum, k) => sum + (counts[k] || 0), 0);
       const cumulativePercent = total > 0 ? (leadsAtOrBeyond / total) * 100 : 0;
@@ -770,7 +771,7 @@ const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
       // Conversion %: from previous stage to this stage
       let conversionPercent = 100;
       if (index > 0) {
-        const prevKey = STAGE_ORDER[index - 1]!;
+        const prevKey = FUNNEL_STAGES[index - 1]!;
         const prevCount = counts[prevKey] || 0;
         conversionPercent = prevCount > 0 ? (count / prevCount) * 100 : 0;
       }
@@ -790,12 +791,32 @@ const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
     });
   }, [data]);
 
-  // Max count for bar scaling
-  const maxBarWidth = useMemo(() => {
-    return Math.max(...stages.map(s => s.count), 1);
-  }, [stages]);
+  // Dropoff data (No Reply, Disqualified)
+  const dropoffs = useMemo(() => {
+    const total = data.total;
+    return DROPOFF_STAGES.map(key => {
+      const count = key === 'noReply' ? data.noReply : data.disqualified;
+      const config = STAGE_CONFIG[key]!;
+      const percent = total > 0 ? (count / total) * 100 : 0;
+      return {
+        key,
+        label: config.label,
+        count,
+        percent,
+        color: funnelColors[config.colorKey],
+        icon: config.icon,
+        bgClass: config.bgClass,
+        textClass: config.textClass,
+      };
+    });
+  }, [data]);
 
-  if (stages.length === 0) {
+  // Max count for bar scaling (funnel stages only)
+  const maxBarWidth = useMemo(() => {
+    return Math.max(...funnelStages.map(s => s.count), 1);
+  }, [funnelStages]);
+
+  if (funnelStages.length === 0) {
     return (
       <div className="text-center py-8 text-slate-400">
         No lead data available
@@ -822,7 +843,7 @@ const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
       {isMobile ? (
         /* Mobile: Card layout */
         <div className="space-y-3">
-          {stages.map((stage, index) => (
+          {funnelStages.map((stage, index) => (
             <GHLFunnelRowMobile
               key={stage.key}
               stage={stage}
@@ -830,6 +851,29 @@ const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
               maxBarWidth={maxBarWidth}
             />
           ))}
+
+          {/* Dropoffs section */}
+          <div className="pt-4 border-t border-slate-200 mt-4">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Exits</p>
+            <div className="flex flex-wrap gap-3">
+              {dropoffs.map((d) => {
+                const Icon = d.icon;
+                return (
+                  <div key={d.key} className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${d.key === 'disqualified' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${d.bgClass}`}>
+                      <Icon size={16} className={d.textClass} />
+                    </div>
+                    <div>
+                      <p className={`text-sm font-bold ${d.key === 'disqualified' ? 'text-rose-700' : 'text-slate-700'}`}>{d.label}</p>
+                      <p className={`text-xs ${d.key === 'disqualified' ? 'text-rose-500' : 'text-slate-500'}`}>
+                        {d.count.toLocaleString()} ({d.percent.toFixed(1)}%)
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       ) : (
         /* Desktop: Table layout */
@@ -851,8 +895,8 @@ const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
             </div>
           </div>
 
-          {/* Rows */}
-          {stages.map((stage, index) => (
+          {/* Funnel Rows */}
+          {funnelStages.map((stage, index) => (
             <GHLFunnelRow
               key={stage.key}
               stage={stage}
@@ -860,6 +904,27 @@ const GHLFunnel = React.memo<GHLFunnelProps>(({ data }) => {
               maxBarWidth={maxBarWidth}
             />
           ))}
+
+          {/* Dropoffs section */}
+          <div className="flex flex-wrap gap-3 mt-6 pt-4 border-t border-slate-200">
+            <p className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Exits</p>
+            {dropoffs.map((d) => {
+              const Icon = d.icon;
+              return (
+                <div key={d.key} className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${d.key === 'disqualified' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${d.bgClass}`}>
+                    <Icon size={16} className={d.textClass} />
+                  </div>
+                  <div>
+                    <p className={`text-sm font-bold ${d.key === 'disqualified' ? 'text-rose-700' : 'text-slate-700'}`}>{d.label}</p>
+                    <p className={`text-xs ${d.key === 'disqualified' ? 'text-rose-500' : 'text-slate-500'}`}>
+                      {d.count.toLocaleString()} ({d.percent.toFixed(1)}%)
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
