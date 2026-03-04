@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 .vercel
 .env*.local
+
+# TestSprite temp config
+testsprite_tests/tmp/
